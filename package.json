@@ -1,0 +1,28 @@
+{
+  "name": "proglintor",
+  "productName": "Proglintor",
+  "version": "1.0.0",
+  "description": "Proglintor by Proglint: employee app-usage agent and admin console.",
+  "main": "src/agent/main.js",
+  "author": {
+    "name": "Proglint",
+    "email": "it@proglint.com"
+  },
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "agent": "electron src/agent/main.js",
+    "admin": "electron src/admin/main.js",
+    "test": "node --test test/*.test.js",
+    "dist:agent:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config build/agent.json --mac",
+    "dist:agent:win": "electron-builder --config build/agent.json --win",
+    "dist:agent:linux": "electron-builder --config build/agent.json --linux",
+    "dist:admin:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config build/admin.json --mac",
+    "dist:admin:win": "electron-builder --config build/admin.json --win",
+    "dist:admin:linux": "electron-builder --config build/admin.json --linux"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  }
+}

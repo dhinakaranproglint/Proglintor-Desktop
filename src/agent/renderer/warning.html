@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Weekend work check</title>
+  <link rel="stylesheet" href="../../shared/renderer/styles.css">
+  <style>
+    body { overflow-y: auto; user-select: none; }
+    body, body.platform-darwin { background: var(--bg); }
+    .wrap { padding: 34px 30px 0; display: flex; flex-direction: column; gap: 18px; min-height: 100vh; -webkit-app-region: no-drag; }
+    .platform-darwin .wrap { padding-top: 46px; }
+    .drag { position: fixed; top: 0; left: 0; right: 0; height: 36px; -webkit-app-region: drag; }
+    .hero-warn { text-align: center; }
+    .warn-icon {
+      width: 60px; height: 60px; margin: 0 auto 12px; border-radius: 22px; display: grid; place-items: center; color: #fff;
+      background: linear-gradient(135deg, #fbbf24, #f97316); box-shadow: 0 12px 28px -10px rgba(249, 115, 22, 0.7);
+      animation: nudge 1.6s ease-in-out 0.3s 2;
+    }
+    @keyframes nudge { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-8deg); } 40% { transform: rotate(8deg); } 60% { transform: rotate(-4deg); } }
+    .hero-warn h1 { margin: 0; font: 700 23px/1.2 var(--font-display); letter-spacing: -0.02em; }
+    .hero-warn p { margin: 8px auto 0; color: var(--text-2); max-width: 420px; }
+    .apppill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-weight: 650; color: var(--text); }
+    .policy { display: flex; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--orange-soft); border: 1px solid color-mix(in srgb, var(--orange) 30%, transparent); color: var(--text-2); font-size: 12.5px; }
+    .policy .i { color: var(--orange); margin-top: 1px; }
+    .q { font: 650 14px var(--font-display); margin-bottom: 8px; }
+    .seg-full { display: flex; }
+    .seg-full button { flex: 1; text-align: center; }
+    .foot { position: sticky; bottom: 0; margin: auto -30px 0; display: flex; align-items: center; gap: 10px; padding: 14px 30px 18px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--border); }
+    .foot .note { flex: 1; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .done { text-align: center; padding: 60px 10px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .done .ok-icon { width: 68px; height: 68px; border-radius: 50%; display: grid; place-items: center; background: var(--green-soft); color: var(--green); animation: pop .25s ease-out; }
+    .done h2 { margin: 6px 0 0; font: 700 21px var(--font-display); }
+  </style>
+</head>
+<body>
+  <div class="drag"></div>
+  <div class="wrap" id="root"></div>
+  <script src="../../shared/renderer/common.js"></script>
+  <script src="warning.js"></script>
+</body>
+</html>

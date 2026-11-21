@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proglintor</title>
+  <link rel="stylesheet" href="../../shared/renderer/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-drag"></div>
+      <div class="brand">
+        <picture class="wordmark"><source srcset="../../../assets/brand/proglint-logo-white.png" media="(prefers-color-scheme: dark)"><img src="../../../assets/brand/proglint-logo.png" alt="Proglint"></picture>
+        <div class="product">Proglintor</div>
+      </div>
+      <nav id="nav">
+        <button data-page="overview" class="active"><span data-icon="overview"></span>Overview</button>
+        <button data-page="apps"><span data-icon="apps"></span>Applications</button>
+        <button data-page="settings"><span data-icon="settings"></span>Settings</button>
+      </nav>
+      <div class="side-now" id="side-now"></div>
+    </aside>
+
+    <main class="main">
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true"></aside>
+  <div class="tip" id="tip"></div>
+
+  <script src="../../shared/renderer/common.js"></script>
+  <script src="../../shared/renderer/charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

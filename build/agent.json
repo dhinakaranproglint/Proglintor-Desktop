@@ -1,0 +1,51 @@
+{
+  "appId": "com.proglint.proglintor.agent",
+  "productName": "Proglintor",
+  "directories": {
+    "output": "dist/agent"
+  },
+  "files": [
+    "src/**/*",
+    "assets/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "src/agent/main.js",
+    "productName": "Proglintor"
+  },
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "category": "public.app-category.business",
+    "icon": "assets/icon.png"
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "icon": "assets/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "${productName}-Setup-${version}.${ext}"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Office",
+    "icon": "assets/icon.png",
+    "maintainer": "Proglint IT <it@proglint.com>",
+    "executableName": "proglintor"
+  },
+  "deb": {
+    "depends": [
+      "x11-utils"
+    ]
+  }
+}

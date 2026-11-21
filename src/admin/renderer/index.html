@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Proglintor Admin</title>
+  <link rel="stylesheet" href="../../shared/renderer/styles.css">
+  <style>
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+    .kpi .big { font-size: 34px; margin: 8px 0 2px; }
+    .kpi .big small { font-size: 16px; }
+    .kpi .hint { font-size: 12px; color: var(--muted); }
+    .kpi.alert .big { color: var(--orange); }
+    .live { display: flex; flex-direction: column; margin: 0 -8px; }
+    .live-row { all: unset; display: grid; grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1.3fr) 74px; align-items: center; gap: 12px; padding: 9px 8px; border-radius: 10px; cursor: default; }
+    .live-row:hover { background: var(--surface-2); }
+    .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 13px; position: relative; flex-shrink: 0;
+      background: linear-gradient(135deg, hsl(var(--h) 65% 58%), hsl(calc(var(--h) + 40) 65% 46%)); }
+    .avatar .dot { position: absolute; right: -1px; bottom: -1px; border: 2px solid var(--surface); width: 11px; height: 11px; }
+    .avatar.lg { width: 56px; height: 56px; font-size: 20px; }
+    .avatar.lg .dot { width: 14px; height: 14px; }
+    .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    .sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    .doing { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .doing .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .right { text-align: right; }
+    .assets-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(200px, 1.4fr) minmax(120px, 1fr) minmax(200px, 1.5fr) 80px 110px 18px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
+    .assets-row.head { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; background: var(--surface-2); padding: 9px 18px; }
+    .assets-row.item:hover { background: var(--surface-2); }
+    .assets-row:last-child { border-bottom: none; }
+    .alert-card { display: grid; grid-template-columns: 40px 1fr auto; gap: 14px; align-items: start; }
+    .alert-card .ai { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #fbbf24, #f97316); }
+    .alert-card.dismissed .ai { background: var(--surface-3); color: var(--muted); }
+    .alert-card.reviewed { opacity: .72; }
+    .alert-card .title { font-weight: 600; line-height: 1.5; }
+    .reason { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 12px; }
+    .reason.post { background: var(--surface-2); color: var(--muted); }
+    .quote { margin-top: 8px; padding: 8px 12px; border-left: 3px solid var(--border-strong); color: var(--text-2); background: var(--surface-2); border-radius: 0 8px 8px 0; white-space: pre-wrap; user-select: text; }
+    .meta { margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+    .note-input { margin-top: 10px; }
+    .alerts-list { display: flex; flex-direction: column; gap: 12px; }
+    .chips-run { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chips-run span { padding: 4px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 12px; }
+    .chips-run span.now { background: var(--green-soft); border-color: transparent; color: color-mix(in srgb, var(--green) 75%, var(--text)); font-weight: 600; }
+    .inst-list { max-height: 320px; overflow-y: auto; margin: 0 -4px; }
+    .inst-row { display: grid; grid-template-columns: 1fr 90px 110px; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+    .inst-row:last-child { border-bottom: none; }
+    .drawer.wide { width: min(680px, 94vw); }
+    .addr-list { display: flex; flex-direction: column; gap: 8px; }
+    .shell[hidden] { display: none; }
+    #login { position: fixed; inset: 0; background: var(--bg); overflow-y: auto; -webkit-app-region: drag; }
+    .login-wrap { min-height: 100%; display: grid; place-items: center; padding: 40px 20px; }
+    .login-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 30px 30px 24px; -webkit-app-region: no-drag; }
+    .login-card h1 { margin: 0; text-align: center; font: 700 22px var(--font-display); letter-spacing: -0.02em; }
+    .login-card > p { margin: -8px 0 6px; text-align: center; }
+    .login-logo { width: 64px; height: 64px; margin: 0 auto; border-radius: 16px; }
+    @media (max-width: 1180px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-drag"></div>
+      <div class="brand">
+        <picture class="wordmark"><source srcset="../../../assets/brand/proglint-logo-white.png" media="(prefers-color-scheme: dark)"><img src="../../../assets/brand/proglint-logo.png" alt="Proglint"></picture>
+        <div class="product">Proglintor <span class="tag-admin">Admin</span></div>
+      </div>
+      <nav id="nav">
+        <button data-page="dashboard" class="active"><span data-icon="dashboard"></span>Dashboard</button>
+        <button data-page="assets"><span data-icon="monitor"></span>Assets</button>
+        <button data-page="alerts"><span data-icon="bell"></span>Weekend alerts<span class="badge" id="alert-badge" hidden></span></button>
+        <button data-page="policies"><span data-icon="shield"></span>Policies</button>
+        <button data-page="settings"><span data-icon="settings"></span>Settings</button>
+      </nav>
+      <div class="side-now" id="side-server"></div>
+    </aside>
+    <main class="main"><div id="view"></div></main>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer wide" id="drawer" aria-hidden="true"></aside>
+  <div id="dialog-root"></div>
+  <div class="tip" id="tip"></div>
+
+  <script src="../../shared/renderer/common.js"></script>
+  <script src="../../shared/renderer/charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

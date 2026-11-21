@@ -1,0 +1,46 @@
+# Builds Proglintor (agent) and Proglintor Admin for Windows, macOS and Ubuntu.
+name: Build Proglintor
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        app: [agent, admin]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Package
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Windows) target=--win ;;
+            macOS) target=--mac ;;
+            *) target=--linux ;;
+          esac
+          npx electron-builder --config build/${{ matrix.app }}.json $target --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proglintor-${{ matrix.app }}-${{ matrix.os }}
+          path: |
+            dist/${{ matrix.app }}/*.exe
+            dist/${{ matrix.app }}/*.dmg
+            dist/${{ matrix.app }}/*.zip
+            dist/${{ matrix.app }}/*.AppImage
+            dist/${{ matrix.app }}/*.deb
+          if-no-files-found: ignore

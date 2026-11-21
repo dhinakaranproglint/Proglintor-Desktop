@@ -1,0 +1,46 @@
+{
+  "appId": "com.proglint.proglintor.admin",
+  "productName": "Proglintor Admin",
+  "directories": {
+    "output": "dist/admin"
+  },
+  "files": [
+    "src/**/*",
+    "assets/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "src/admin/main.js",
+    "productName": "Proglintor Admin"
+  },
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "category": "public.app-category.business",
+    "icon": "assets/admin-icon.png"
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "icon": "assets/admin-icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "${productName}-Setup-${version}.${ext}"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Office",
+    "icon": "assets/admin-icon.png",
+    "maintainer": "Proglint IT <it@proglint.com>",
+    "executableName": "proglintor-admin"
+  }
+}
