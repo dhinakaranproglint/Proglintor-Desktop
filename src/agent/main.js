@@ -10,6 +10,9 @@ const { UsageStore, dayKey } = require('./store');
 const { Tracker } = require('./tracker');
 const { Catalog } = require('./catalog');
 const { Sync } = require('./sync');
+const { SoftwareAgent } = require('./software');
+const { watchApps } = require('./appwatch');
+const { run: runCommand } = require('./platform/util');
 const { isDevTool, isWeekend } = require('../shared/policy');
 const brand = require('../shared/branding');
 
@@ -36,7 +39,7 @@ const SWIFT_SELF_ID = 'com.local.MachineMonitor';
 let win = null;
 let popover = null;
 let tray = null;
-let store, tracker, catalog, settings, sync;
+let store, tracker, catalog, settings, sync, software, appWatch;
 let warnWin = null;
 let quitting = false;
 /** Installed builds can't be quit by the user; only shutdown, restart or logout (or development runs) end the agent. */
@@ -166,11 +169,20 @@ function migrateLegacy() {
   fs.rmSync(path.join(os.homedir(), '.config', 'autostart', 'proglint-pulse.desktop'), { force: true });
 }
 
+/** Is the signed-in user a local administrator? (macOS: member of the "admin" group). Installing a .pkg needs one, or an administrator's password. */
+let localAdmin = null;
+async function detectLocalAdmin() {
+  if (!IS_MAC) return;
+  try { localAdmin = (await runCommand('id', ['-Gn'], { timeout: 5000 })).trim().split(/\s+/).includes('admin'); } catch { localAdmin = null; }
+}
+
 function device() {
   return {
+    localAdmin,
     hostname: os.hostname(),
     os: `${platform.name} ${os.release()}`,
     platform: process.platform,
+    arch: process.arch,
     agentVersion: VERSION,
   };
 }
@@ -188,6 +200,7 @@ async function runningApps() {
 
 async function init() {
   settings = loadSettings();
+  detectLocalAdmin(); // fills in `localAdmin` for the next heartbeat
   setDockIcon();
   migrateLegacy();
   store = new UsageStore(app.getPath('userData'));
@@ -221,6 +234,25 @@ async function init() {
     onRemoved: onAssetRemoved,
   });
   sync.start();
+
+  // Install assistant: runs approved installs for this laptop and reports back.
+  software = new SoftwareAgent({
+    dir: app.getPath('userData'),
+    sync,
+    runningApps,
+    detect: detectInstalled,
+    afterInstall: async () => { await catalog.refresh(); await sync.pushInstalled(true); },
+    // A fresh installed-apps list whenever the employee asks for something, unless the apps folders haven't changed (their modification
+    // time moves the instant an app is added or removed, long before the file watcher's settle delay).
+    refreshInventory: async () => { const sig = appsSignature(); await catalog.refresh(); await sync.pushInstalled(true); lastAppsSig = sig; },
+    inventoryUnchanged: IS_MAC ? () => appsSignature() === lastAppsSig : undefined,
+    notify: notifyEmployee,
+    onChange: () => broadcast('agent:software'),
+  });
+  sync.onSoftwareJobs = () => software.poke();
+  // Apps installed or removed (by us, by the employee, by IT): the list follows within seconds.
+  if (IS_MAC) appWatch = watchApps(APP_DIRS, async () => { const sig = appsSignature(); await catalog.refresh(); await sync.pushInstalled(); lastAppsSig = sig; });
+  software.start();
   setInterval(() => checkWeekend(tracker.status().current), 60 * 1000);
 
   // Company-managed: always start with the computer (installed builds).
@@ -241,6 +273,30 @@ async function init() {
   setInterval(() => broadcast('agent:tick'), 10000); // let open views refresh running totals
 }
 
+const APP_DIRS = IS_MAC ? ['/Applications', path.join(os.homedir(), 'Applications')] : [];
+let lastAppsSig = '';
+function appsSignature() {
+  return APP_DIRS.map((d) => { try { return fs.statSync(d).mtimeMs; } catch { return 0; } }).join('|');
+}
+
+/** After an install: is the app really there? (path when we know it, otherwise the rescanned app list). */
+async function detectInstalled(spec, installedPath) {
+  if (installedPath) return fs.existsSync(installedPath);
+  await catalog.refresh();
+  const id = String(spec.appId || '').toLowerCase();
+  const name = String(spec.name || '').toLowerCase();
+  return catalog.apps.some((a) => (id && String(a.id).toLowerCase() === id) || String(a.name).toLowerCase() === name);
+}
+
+/** Native notification for install updates; skipped while the employee is already looking at the window. */
+function notifyEmployee(title, body) {
+  if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return;
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body });
+  n.on('click', () => { showWindow(); win?.webContents.send('agent:goto', 'install'); });
+  n.show();
+}
+
 app.on('before-quit', (e) => {
   // Installed agent: Cmd+Q / Alt+F4 / "Quit" from the Dock only hide it; it keeps tracking in the background.
   if (MANAGED && !systemQuit && gotLock) {
@@ -249,6 +305,8 @@ app.on('before-quit', (e) => {
     return;
   }
   quitting = true;
+  software?.stop();
+  appWatch?.close();
   tracker?.stop();
 });
 // Windows sends this at logout/shutdown.
@@ -267,6 +325,7 @@ app.on('activate', showWindow);
 
 /** The admin deleted this laptop's asset (or issued a new code): tell the employee and refresh the UI. */
 function onAssetRemoved(st) {
+  software?.reset();
   broadcast('agent:update');
   updateTray();
   if (Notification.isSupported()) {
@@ -559,6 +618,27 @@ function registerIpc() {
   ipcMain.handle('org:sync', async () => {
     try { await sync.syncNow(); return { ok: true }; } catch (err) { return { ok: false, error: err.message }; }
   });
+
+  // Install assistant (employee). Inputs are validated here too: the renderer is not trusted.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const bad = (error) => ({ ok: false, code: 'invalid', error });
+  ipcMain.handle('sw:catalogue', () => software.catalogue());
+  ipcMain.handle('sw:list', () => software.list());
+  ipcMain.handle('sw:preview', (_e, prompt) => (typeof prompt === 'string' && prompt.length <= 600 ? software.preview(prompt) : bad('Please type a shorter request.')));
+  ipcMain.handle('sw:submit', (_e, prompt, key, reinstall) => {
+    if (typeof prompt !== 'string' || prompt.length > 600) return bad('Please type a shorter request.');
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,64}$/.test(key)) return bad('This request is missing its id. Please try again.');
+    return software.submit(prompt, key, reinstall === true);
+  });
+  ipcMain.handle('sw:assist', (_e, message, history) => {
+    if (typeof message !== 'string' || message.length > 600) return bad('Please type a shorter message.');
+    const lines = (Array.isArray(history) ? history : []).slice(-6)
+      .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.text === 'string')
+      .map((h) => ({ role: h.role, text: h.text.slice(0, 300) }));
+    return software.assist(message, lines);
+  });
+  ipcMain.handle('sw:confirm', (_e, id) => (typeof id === 'string' && UUID.test(id) ? software.confirm(id) : bad('I could not find that suggestion.')));
+  ipcMain.handle('sw:cancel', (_e, id) => (typeof id === 'string' && UUID.test(id) ? software.cancel(id) : bad('I could not find that request.')));
 
   // Weekend check window
   ipcMain.handle('warning:info', (e) => {

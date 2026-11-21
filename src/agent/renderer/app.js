@@ -704,6 +704,7 @@ function go(page) {
   if (page === 'overview') loadOverview();
   else if (page === 'apps') loadApps();
   else if (page === 'device') loadDevice();
+  else if (page === 'install') renderInstall();
   else loadSettings();
 }
 $$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.page)));

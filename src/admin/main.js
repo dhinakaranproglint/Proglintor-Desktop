@@ -7,6 +7,9 @@ const path = require('path');
 
 const brand = require('../shared/branding');
 const { Backend, AuthError } = require('./backend');
+const { inspectLink, friendly, InspectError, cleanLinkInput } = require('./inspect');
+const { renderAndCapture } = require('./render');
+const presets = require('./presets');
 
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 const IS_MAC = process.platform === 'darwin';
@@ -23,6 +26,8 @@ let backend = null;
 let quitting = false;
 let seenAlerts = null; // uids of "new" alerts already notified (null until the first poll)
 let newAlertCount = 0;
+let seenApprovals = null; // ids of software requests waiting for approval that were already notified
+let pendingApprovals = 0;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -92,6 +97,11 @@ async function poll() {
     const uids = new Set(alerts.map((a) => a.uid));
     if (seenAlerts) for (const a of alerts) if (!seenAlerts.has(a.uid)) notify(a);
     seenAlerts = uids;
+    const pending = (await backend.get('/api/admin/software/approvals')).items || [];
+    pendingApprovals = pending.length;
+    const ids = new Set(pending.map((r) => r.id));
+    if (seenApprovals) for (const r of pending) if (!seenApprovals.has(r.id)) notifyApproval(r);
+    seenApprovals = ids;
   } catch (err) {
     if (err instanceof AuthError) send('admin:auth');
   }
@@ -110,13 +120,24 @@ function notify(alert) {
   n.show();
 }
 
+function notifyApproval(req) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({
+    title: 'Software approval needed',
+    body: `${req.employeeName} (${req.assetId}) asked for ${[req.softwareName, req.version].filter(Boolean).join(' ')}.`,
+  });
+  n.on('click', () => { showWindow(); send('admin:navigate', 'approvals'); });
+  n.show();
+}
+
 function send(channel, ...args) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
 }
 
 function updateBadge() {
-  if (IS_MAC) app.dock?.setBadge(newAlertCount ? String(newAlertCount) : '');
-  else app.setBadgeCount?.(newAlertCount);
+  const total = newAlertCount + pendingApprovals;
+  if (IS_MAC) app.dock?.setBadge(total ? String(total) : '');
+  else app.setBadgeCount?.(total);
   updateTray();
 }
 
@@ -165,6 +186,7 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: status, enabled: false },
     ...(newAlertCount ? [{ label: `${newAlertCount} new weekend alert${newAlertCount === 1 ? '' : 's'}`, click: () => { showWindow(); send('admin:navigate', 'alerts'); } }] : []),
+    ...(pendingApprovals ? [{ label: `${pendingApprovals} software request${pendingApprovals === 1 ? '' : 's'} to approve`, click: () => { showWindow(); send('admin:navigate', 'approvals'); } }] : []),
     { type: 'separator' },
     { label: 'Open Admin Console', click: showWindow },
     { type: 'separator' },
@@ -213,7 +235,7 @@ function registerIpc() {
   const form = (channel, fn) => ipcMain.handle(channel, async (...args) => {
     try { return { ok: true, data: await fn(...args) }; } catch (err) {
       if (err instanceof AuthError) send('admin:auth', err.message);
-      return { ok: false, error: err.message };
+      return { ok: false, error: err.message, code: err.code || null, status: err.status || null, network: Boolean(err.network) };
     }
   });
 
@@ -225,13 +247,13 @@ function registerIpc() {
       return { ok: false, error: err.message, field: err.field || null, needsSetup: Boolean(err.needsSetup), network: Boolean(err.network) };
     }
   });
-  const signedIn = (user) => { seenAlerts = null; poll(); return user; };
+  const signedIn = (user) => { seenAlerts = null; seenApprovals = null; poll(); return user; };
   authForm('auth:check', (_e, url) => backend.check(url));
   authForm('auth:login', async (_e, url, login, password) => signedIn(await backend.login(url, login, password)));
   authForm('auth:setup', async (_e, url, form) => signedIn(await backend.setup(url, form)));
   authForm('auth:forgot', (_e, url, login) => backend.forgot(url, login));
   authForm('auth:reset', async (_e, url, login, code, password) => signedIn(await backend.reset(url, login, code, password)));
-  handle('auth:logout', async () => { await backend.logout(); seenAlerts = null; newAlertCount = 0; updateBadge(); return true; });
+  handle('auth:logout', async () => { await backend.logout(); seenAlerts = null; newAlertCount = 0; seenApprovals = null; pendingApprovals = 0; updateBadge(); return true; });
 
   // Data
   handle('dash:get', async () => ({ ...(await backend.get('/api/admin/dashboard')), server: serverInfo() }));
@@ -255,6 +277,101 @@ function registerIpc() {
 
   handle('alerts:list', (_e, status) => backend.get(`/api/admin/alerts?status=${enc(status || 'all')}`));
   handle('alerts:update', async (_e, uid, patch) => { const r = await backend.patch(`/api/admin/alerts/${enc(uid)}`, patch); poll(); return r; });
+
+  // Software catalogue and approvals (admin only: the backend refuses these to anyone without a staff token).
+  const swPath = (p) => `/api/admin/software/${p}`;
+  const isId = (v) => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
+  const isSlug = (v) => typeof v === 'string' && /^[a-z0-9][a-z0-9._-]{1,59}$/.test(v);
+  // The catalogue list carries no icons (they can be large and rarely change). Fetch only the ones not seen yet, keyed by entry + last update.
+  const softwareIconCache = new Map();
+  handle('sw:items', async () => {
+    const data = await backend.get(swPath('items'));
+    const key = (i) => `${i.slug}@${i.updatedAt}`;
+    const need = (data.items || []).filter((i) => i.hasIcon && !softwareIconCache.has(key(i)));
+    for (let k = 0; k < need.length; k += 40) {
+      const chunk = need.slice(k, k + 40);
+      try {
+        const r = await backend.get(swPath(`icons?slugs=${enc(chunk.map((i) => i.slug).join(','))}`));
+        for (const i of chunk) softwareIconCache.set(key(i), (r.icons || {})[i.slug] || null);
+      } catch { break; } // icons are decoration: a failure shows letter tiles and is retried on the next refresh
+    }
+    for (const i of data.items || []) i.icon = softwareIconCache.get(key(i)) || null;
+    return data;
+  });
+  form('sw:item:create', async (_e, data) => { const r = await backend.post(swPath('items'), data); send('admin:update'); return r; });
+  form('sw:item:update', async (_e, slug, data) => {
+    if (!isSlug(slug)) throw new Error('Unknown software entry');
+    const r = await backend.patch(swPath(`items/${enc(slug)}`), data);
+    send('admin:update');
+    return r;
+  });
+  handle('sw:item:delete', async (_e, slug, name) => {
+    if (!isSlug(slug)) throw new Error('Unknown software entry');
+    if (!(await confirm(`Remove ${name || slug} from the catalogue?`, 'Employees will no longer be able to request it. Past requests and the audit trail are kept.', 'Remove'))) return false;
+    try { await backend.delete(swPath(`items/${enc(slug)}`)); } catch (err) { return { __error: err.message }; }
+    send('admin:update');
+    return true;
+  });
+  // "Add software" from a link or a popular app: download, identify, verify and measure, so the admin doesn't type technical details.
+  let inspecting = null;
+  ipcMain.handle('sw:presets', () => presets.listPresets());
+  ipcMain.handle('sw:inspect:cancel', () => { inspecting?.abort(); return true; });
+  ipcMain.handle('sw:inspect', async (_e, req) => {
+    if (!backend.loggedIn) return { ok: false, ...friendly('FAILED'), message: 'Please sign in again.' };
+    const preset = req && typeof req.presetId === 'string' ? presets.byId(req.presetId) : null;
+    const url = preset ? preset.url : cleanLinkInput(req && req.url);
+    if (!url || url.length > 2000) return { ok: false, ...friendly('LINK_NOT_HTTPS') };
+    inspecting?.abort(); // one check at a time
+    const ctl = new AbortController();
+    inspecting = ctl;
+    try {
+      const d = await inspectLink(url, {
+        expectTeamId: preset?.teamId || (req && /^[A-Z0-9]{10}$/.test(req.expectTeamId || '') ? req.expectTeamId : ''), hintName: preset?.name || (req && typeof req.hintName === 'string' ? req.hintName.slice(0, 80) : ''),
+        preferPlatform: req && ['darwin', 'win32', 'linux'].includes(req.preferPlatform) ? req.preferPlatform : undefined,
+        preferArch: req && ['x64', 'arm64'].includes(req.preferArch) ? req.preferArch : undefined, signal: ctl.signal,
+        allowLoopbackHttp: Boolean(process.env.PROGLINTOR_ALLOW_LOOPBACK_HTTP), onStage: (st) => send('admin:inspect', st), renderPage: renderAndCapture,
+      });
+      if (preset) {
+        d.name = preset.name;
+        d.publisher = d.publisher || preset.publisher;
+        d.description = preset.description;
+        d.aliases = [...new Set([...preset.aliases, ...d.aliases])];
+      }
+      return { ok: true, data: d };
+    } catch (err) {
+      return { ok: false, ...friendly(err instanceof InspectError ? err.code : 'FAILED'), choices: err instanceof InspectError ? err.choices || null : null };
+    } finally {
+      if (inspecting === ctl) inspecting = null;
+    }
+  });
+  // New software (not in the catalogue): the admin has checked the file here; this adds it to the catalogue and approves the request in one step.
+  form('sw:approve-new', async (_e, id, expectedVersion, item, licenceConfirmed) => {
+    if (!isId(id)) throw new Error('Unknown request');
+    try {
+      const r = await backend.post(swPath(`requests/${enc(id)}/approve-new`), { expectedVersion, item, licenceConfirmed: licenceConfirmed === true });
+      poll();
+      send('admin:update');
+      return r;
+    } catch (err) {
+      poll();
+      throw err;
+    }
+  });
+  handle('sw:approvals', () => backend.get(swPath('approvals')));
+  handle('sw:requests', (_e, status) => backend.get(swPath(`requests?status=${enc(status || '')}`)));
+  handle('sw:request', (_e, id) => { if (!isId(id)) throw new Error('Unknown request'); return backend.get(swPath(`requests/${enc(id)}`)); });
+  form('sw:decide', async (_e, id, decision, expectedVersion, comment) => {
+    if (!isId(id)) throw new Error('Unknown request');
+    if (decision !== 'APPROVED' && decision !== 'REJECTED') throw new Error('Unknown decision');
+    try {
+      const r = await backend.post(swPath(`requests/${enc(id)}/decision`), { decision, expectedVersion, comment: String(comment || '').slice(0, 500) });
+      poll();
+      return r;
+    } catch (err) {
+      poll();
+      throw err;
+    }
+  });
 
   handle('policy:get', () => backend.get('/api/admin/policy'));
   handle('policy:set', (_e, p) => backend.put('/api/admin/policy', p));

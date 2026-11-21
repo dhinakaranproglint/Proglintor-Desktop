@@ -67,7 +67,7 @@ class Backend {
     }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(data.error || data.detail || `Server error (${res.status})`), { status: res.status });
+    if (!res.ok) throw Object.assign(new Error(data.error || data.detail || `Server error (${res.status})`), { status: res.status, code: data.code });
     return data;
   }
 

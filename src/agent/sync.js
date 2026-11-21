@@ -111,11 +111,11 @@ class Sync {
     };
   }
 
-  async _request(base, p, body, token) {
+  async _request(base, p, body, token, method = 'POST') {
     const res = await fetch(base + p, {
-      method: 'POST',
+      method,
       headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body),
+      body: method === 'GET' ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
     const data = await res.json().catch(() => ({}));
@@ -165,6 +165,27 @@ class Sync {
         this.lastError = err.status ? err.message : `${networkHint(err)} Data is saved on this laptop and sent when the server is reachable.`;
       }
       this.onChange?.();
+      throw err;
+    }
+  }
+
+  /**
+   * Authenticated call for the install assistant. Unlike _post it never records a server's "no" (a declined request,
+   * a rate limit...) as a sync problem; only real connection trouble and an explicit "device removed" are tracked.
+   */
+  async call(method, p, body = {}) {
+    if (!this.enrolled) throw Object.assign(new Error('This laptop is not connected'), { status: 401 });
+    try {
+      const data = await this._request(this.cfg.server, p, body, this.cfg.token, method);
+      this.lastOk = Date.now();
+      this.lastError = null;
+      return data;
+    } catch (err) {
+      if (err.status === 401 && err.code === 'device_removed') this._markRemoved();
+      else if (!err.status) {
+        this.lastError = `${networkHint(err)} Data is saved on this laptop and sent when the server is reachable.`;
+        this.onChange?.();
+      }
       throw err;
     }
   }
@@ -277,6 +298,7 @@ class Sync {
     if (data.policy) this.cfg.policy = data.policy;
     if (data.asset) this.cfg.asset = data.asset;
     this._save();
+    if (data.softwareJobs > 0) this.onSoftwareJobs?.(data.softwareJobs); // an approved install is waiting for this laptop
     await this.flushAlerts();
     this.onChange?.();
   }

@@ -21,6 +21,20 @@ contextBridge.exposeInMainWorld('agent', {
   orgStatus: () => ipcRenderer.invoke('org:status'),
   enroll: (code) => ipcRenderer.invoke('org:enroll', code),
   syncNow: () => ipcRenderer.invoke('org:sync'),
+  // Install assistant
+  software: {
+    catalogue: () => ipcRenderer.invoke('sw:catalogue'),
+    list: () => ipcRenderer.invoke('sw:list'),
+    preview: (prompt) => ipcRenderer.invoke('sw:preview', prompt),
+    assist: (message, history) => ipcRenderer.invoke('sw:assist', message, history),
+    submit: (prompt, key, reinstall) => ipcRenderer.invoke('sw:submit', prompt, key, reinstall === true),
+    confirm: (id) => ipcRenderer.invoke('sw:confirm', id),
+    cancel: (id) => ipcRenderer.invoke('sw:cancel', id),
+  },
+  /** An install request changed (approved, progress, finished). */
+  onSoftware: (fn) => ipcRenderer.on('agent:software', () => fn()),
+  /** A notification asked to open a page. */
+  onGoto: (fn) => ipcRenderer.on('agent:goto', (_e, page) => fn(page)),
   // Weekend work check
   warningInfo: () => ipcRenderer.invoke('warning:info'),
   warningSubmit: (answer) => ipcRenderer.invoke('warning:submit', answer),
