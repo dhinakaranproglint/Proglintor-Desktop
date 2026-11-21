@@ -23,9 +23,23 @@ Employee laptops                    Server                              Admin co
 2. **Create an admin login:** `python manage.py createsuperuser` in the backend folder.
 3. **Open Proglintor Admin** and sign in with the backend address (e.g. `http://127.0.0.1:8000`) and that login.
 4. Click **New asset**. Enter the asset ID, employee name, email, department and office. You get a **one-time enrollment code**.
-5. On the employee's laptop, open **Proglintor** → **Connect**, then enter the backend address and the code. The asset turns **Online** within seconds.
+5. On the employee's laptop, open **Proglintor** → **Connect** and enter the code. That's all: employees never type a server address. The asset turns **Online** within seconds.
 
 > **Corporate security software:** tools like CrowdStrike Falcon or FortiClient on a laptop often block incoming connections. A backend running on someone's laptop then only works for that same laptop. The agent handles this case automatically by using 127.0.0.1. For the whole company, run the backend on a server.
+
+## Removing a laptop
+Deleting an asset in the admin (or issuing a new enrollment code for it) deprovisions that laptop:
+- Within about 30 seconds the agent shows **"This laptop was removed from Proglintor"**, with who it was assigned to and when, plus a native notification. Opening the app checks immediately.
+- It stops sending anything to the server, discards answers that were still waiting to be sent, and forgets the old credentials and upload progress. Its own usage history stays on the laptop.
+- To reconnect, the employee enters a new code on the **My Device** page. If the laptop is connected to a *different* asset, the previous person's history is **not** uploaded to it.
+- The agent only treats a rejection as "removed" when the server says so explicitly (`device_removed`). Other errors, such as a proxy returning 401, never disconnect it.
+
+## Setting the server address (IT, once)
+The agent knows which server to use from `src/shared/server.json`, so employees only enter the enrollment code:
+```json
+{ "server": "https://pulse.proglint.com" }
+```
+Edit it **before building the installer** (`npm run dist:agent:…`). For testing you can instead set the `PROGLINTOR_SERVER` environment variable. The default is `http://127.0.0.1:8000` (this computer only). The address is never shown to employees, and error messages don't include it.
 
 ## Features
 **Agent**
@@ -65,6 +79,13 @@ npm run dist:agent:linux  # on Ubuntu → AppImage + .deb
 ```
 `.github/workflows/build.yml` builds both apps for all three OSes on GitHub's runners.
 Builds are unsigned. For company-wide rollout, sign with a *Developer ID Application* certificate (macOS) and a code-signing certificate (Windows).
+
+## App icons
+Icons for both apps (macOS `.icns`, Windows `.ico`, Linux `.png`) are in `assets/icons/` and are generated from the official Proglint logo:
+```bash
+pip install pillow && python3 scripts/make-brand-icons.py
+```
+The installer configs in `build/` already point at them.
 
 ## Security notes
 - Each laptop gets its own random access token at enrollment. The backend stores only its SHA-256 hash.

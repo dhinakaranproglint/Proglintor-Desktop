@@ -11,8 +11,8 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "agent": "electron src/agent/main.js",
-    "admin": "electron src/admin/main.js",
+    "agent": "node scripts/dev.js agent",
+    "admin": "node scripts/dev.js admin",
     "test": "node --test test/*.test.js",
     "dist:agent:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config build/agent.json --mac",
     "dist:agent:win": "electron-builder --config build/agent.json --win",

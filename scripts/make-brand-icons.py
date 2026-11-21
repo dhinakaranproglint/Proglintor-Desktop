@@ -50,13 +50,17 @@ def silhouette(im):
     return out
 
 
-def monogram(size, bg, fg, with_mark=True, pad=0.20, rounded=True):
+def monogram(size, bg, fg, with_mark=True, pad=0.20, rounded=True, inset_ratio=0.06, shadow=False):
     S = size * 4  # supersample
     canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    inset = int(S * 0.06) if rounded else 0
+    inset = int(S * inset_ratio) if rounded else 0
+    if bg and shadow:  # soft drop shadow under the tile (macOS style)
+        sh = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rounded_rectangle((inset, inset + int(S * 0.012), S - inset, S - inset + int(S * 0.012)), radius=int(S * 0.2 * (1 - 2 * inset_ratio)), fill=(0, 0, 0, 120))
+        canvas.alpha_composite(sh.filter(ImageFilter.GaussianBlur(S * 0.012)))
     if bg:
         mask = Image.new("L", (S, S), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((inset, inset, S - inset, S - inset), radius=int(S * 0.2) if rounded else 0, fill=255)
+        ImageDraw.Draw(mask).rounded_rectangle((inset, inset, S - inset, S - inset), radius=int(S * 0.2 * (1 - 2 * inset_ratio)) if rounded else 0, fill=255)
         layer = Image.new("RGBA", (S, S), bg)
         canvas.paste(layer, (0, 0), mask)
     glyph = recolor(p_glyph, fg) if fg else p_glyph
@@ -100,3 +104,29 @@ word = word.resize((600, int(word.height * 600 / word.width)), Image.LANCZOS)
 word.save(OUT / "brand" / "proglint-logo.png")
 recolor(word, (255, 255, 255)).save(OUT / "brand" / "proglint-logo-white.png")
 print("brand assets written to", OUT)
+
+
+# ---- application icons: macOS .icns, Windows .ico, Linux .png ---------------------------------------
+import shutil, subprocess, tempfile
+
+ICONS = OUT / "icons"
+ICONS.mkdir(exist_ok=True)
+WHITE, DARK = (255, 255, 255, 255), (17, 18, 22, 255)
+
+for name, bg, fg in (("agent", WHITE, None), ("admin", DARK, (255, 255, 255))):
+    # Windows / Linux: full-bleed rounded tile.
+    flat = monogram(1024, bg, fg, inset_ratio=0.02, pad=0.13)
+    flat.resize((512, 512), Image.LANCZOS).save(ICONS / f"{name}.png")
+    flat.save(ICONS / f"{name}.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    # macOS: Apple's proportions (tile = 824/1024 of the canvas, with a soft shadow).
+    mac = monogram(1024, bg, fg, inset_ratio=100 / 1024, shadow=True, pad=0.13)
+    mac.save(ICONS / f"{name}-mac.png")
+    if shutil.which("iconutil"):
+        with tempfile.TemporaryDirectory() as td:
+            iconset = Path(td) / f"{name}.iconset"
+            iconset.mkdir()
+            for base in (16, 32, 128, 256, 512):
+                mac.resize((base, base), Image.LANCZOS).save(iconset / f"icon_{base}x{base}.png")
+                mac.resize((base * 2, base * 2), Image.LANCZOS).save(iconset / f"icon_{base}x{base}@2x.png")
+            subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(ICONS / f"{name}.icns")], check=True)
+print("app icons written to", ICONS)

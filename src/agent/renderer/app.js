@@ -124,14 +124,13 @@ function nowCard() {
   const cur = st?.current;
   const body = cur
     ? `<div class="now-app">${appIcon(cur.id, cur.path, 48, cur.name)}<div style="min-width:0"><div class="now-name">${esc(cur.name)}</div><div class="now-timer" data-timer>${fmtClock(st.sessionStart ? (Date.now() - st.sessionStart) / 1000 : 0)}</div></div></div>`
-    : `<div class="now-empty"><span class="bigicon">${icon(st?.paused ? 'pause' : 'clock', 20)}</span><div>${esc(st?.state === 'unavailable' ? st.detector : st?.state === 'idle' ? 'No keyboard or mouse input — time is not being counted.' : st?.paused ? 'Tracking is paused.' : 'Waiting for activity…')}</div></div>`;
+    : `<div class="now-empty"><span class="bigicon">${icon('clock', 20)}</span><div>${esc(st?.state === 'unavailable' ? st.detector : st?.state === 'idle' ? 'No keyboard or mouse input — time is not being counted.' : 'Waiting for activity…')}</div></div>`;
   return `
     <section class="card now">
       <div class="eyebrow"><span class="dot ${cls}"></span> Now</div>
       ${body}
       <div class="foot">
         <span class="state-pill ${cls}">${esc(text)}</span>
-        <button class="btn sm" id="pause-btn">${icon(st?.paused ? 'play' : 'pause', 13)} ${st?.paused ? 'Resume' : 'Pause'}</button>
       </div>
     </section>`;
 }
@@ -162,12 +161,13 @@ function swiftBanner() {
 
 function orgBanner() {
   const org = state.status?.org;
-  if (!org || (org.enrolled && !org.revoked)) return '';
+  if (!org || org.enrolled) return '';
+  const removed = org.removed;
   return `
-    <div class="banner">
-      <span class="bi">${icon('building', 18)}</span>
-      <div class="bt"><b>${org.revoked ? 'This laptop was disconnected from Proglint' : 'Connect this laptop to Proglint'}</b><span class="muted">Enter the server address and enrollment code from your Proglint admin.</span></div>
-      <button class="btn primary sm" id="go-connect">Connect</button>
+    <div class="banner ${removed ? 'warn' : ''}">
+      <span class="bi">${icon(removed ? 'alert' : 'building', 18)}</span>
+      <div class="bt"><b>${removed ? 'This laptop was removed from Proglintor' : 'Connect this laptop to Proglint'}</b><span class="muted">${removed ? `Asset ${esc(removed.assetId)} was removed by your admin, so nothing is being sent to Proglint. Reconnect with a new enrollment code.` : 'Enter the enrollment code from your Proglint admin.'}</span></div>
+      <button class="btn primary sm" id="go-connect">${removed ? 'Reconnect' : 'Connect'}</button>
     </div>`;
 }
 
@@ -305,15 +305,10 @@ function bindOverview(d) {
   $$('.insight[data-day]').forEach((r) => r.addEventListener('click', () => openDay(Number(r.dataset.day))));
   bindPause();
   bindSwiftBanner();
-  $('#go-connect')?.addEventListener('click', () => go('settings'));
+  $('#go-connect')?.addEventListener('click', () => go('device'));
 }
 
-function bindPause() {
-  $('#pause-btn')?.addEventListener('click', async () => {
-    await agent.setSettings({ paused: !state.status?.paused });
-    await refreshStatus();
-  });
-}
+function bindPause() { /* tracking is always on */ }
 
 function bindSwiftBanner() {
   $('#swift-later')?.addEventListener('click', () => { state.swiftDismissed = true; renderOverview(); });
@@ -430,23 +425,20 @@ function drawAppsTable() {
 // ===================================================================================
 
 async function loadSettings() {
-  const [s, st, sw, org] = await Promise.all([agent.getSettings(), agent.status(), agent.swiftCheck(), agent.orgStatus()]);
+  const [s, st, sw] = await Promise.all([agent.getSettings(), agent.status(), agent.swiftCheck()]);
   if (state.page !== 'settings') return;
   state.swift = sw;
   const idle = [[60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min'], [900, '15 min'], [1800, '30 min'], [31536000, 'Never']];
   view.innerHTML = `
     <header class="topbar"><div><h1>Settings</h1><div class="sub">Tracking, data and agent status</div></div></header>
     <div class="content settings">
-      ${orgCard(org)}
 
       <section class="card">
         <div class="card-head"><h3>Tracking</h3></div>
         <div class="srow"><div><div class="st">Stop counting after inactivity</div><div class="sd">Time with no keyboard or mouse input is not counted. Locked screen and sleep are never counted.</div></div>
           <select id="set-idle">${idle.map(([v, l]) => `<option value="${v}" ${v === s.idleThreshold ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div class="srow"><div><div class="st">Pause tracking</div><div class="sd">Temporarily stop recording app usage.</div></div>
-          <label class="switch"><input type="checkbox" id="set-paused" ${s.paused ? 'checked' : ''}><span></span></label></div>
         ${st.managedStartup
-          ? `<div class="srow"><div><div class="st">Starts automatically</div><div class="sd">Proglintor starts when you turn on and sign in to this computer. Managed by Proglint IT.</div></div><span class="status-line ok">${icon('check', 14)} On</span></div>`
+          ? `<div class="srow"><div><div class="st">Starts automatically</div><div class="sd">Proglintor starts when this computer is turned on and keeps running in the background, even when this window is closed. Managed by Proglint IT.</div></div><span class="status-line ok">${icon('check', 14)} On</span></div>`
           : `<div class="srow"><div><div class="st">Start at login</div><div class="sd">Runs quietly in the ${agent.platform === 'darwin' ? 'menu bar' : 'system tray'} after you sign in. Always on in installed builds.</div></div>
           <label class="switch"><input type="checkbox" id="set-login" ${s.openAtLogin ? 'checked' : ''}><span></span></label></div>`}
       </section>
@@ -477,8 +469,6 @@ async function loadSettings() {
 
   const msg = (t) => { $('#set-msg').textContent = t; };
   $('#set-idle').addEventListener('change', (e) => agent.setSettings({ idleThreshold: Number(e.target.value) }).then(() => msg('Saved')));
-  $('#set-paused').addEventListener('change', (e) => agent.setSettings({ paused: e.target.checked }).then(refreshStatus));
-  bindOrgCard();
   $('#set-login')?.addEventListener('change', async (e) => {
     const r = await agent.setSettings({ openAtLogin: e.target.checked });
     e.target.checked = r.openAtLogin;
@@ -495,59 +485,123 @@ async function loadSettings() {
   });
 }
 
-function orgCard(org) {
-  if (org.enrolled && !org.revoked) {
-    return `
-      <section class="card">
-        <div class="card-head"><h3>Organization</h3>
-          <span class="status-line ${org.online ? 'ok' : 'bad'}">${icon(org.online ? 'check' : 'wifi', 14)} ${org.online ? 'Connected' : 'Offline — data is queued'}</span></div>
-        <div class="org-card">
-          <img class="logo" src="../../../assets/icon.png" alt="">
-          <div style="flex:1;min-width:0">
-            <div style="font-weight:650">${esc(org.employeeName)} <span class="idpill">${esc(org.assetId)}</span></div>
-            <div class="muted small">${esc(org.employeeEmail)}${org.department ? ` · ${esc(org.department)}` : ''}</div>
-          </div>
-          <button class="btn sm" id="org-sync">${icon('refresh', 13)} Sync now</button>
-        </div>
-        <div class="srow" style="margin-top:12px"><div class="st">Server</div><div class="mono small">${esc(org.server)}</div></div>
-        <div class="srow"><div class="st">Last sync</div><div>${org.lastSync ? esc(rel(org.lastSync)) : '—'}</div></div>
-        ${org.pendingAlerts ? `<div class="srow"><div class="st">Waiting to send</div><div>${org.pendingAlerts} weekend answer${org.pendingAlerts === 1 ? '' : 's'}</div></div>` : ''}
-        ${org.lastError ? `<div class="banner warn" style="margin-top:12px"><span class="bi">${icon('wifi', 16)}</span><div class="bt">${esc(org.lastError)}</div></div>` : ''}
-      </section>`;
-  }
+/** "Mar 4, 2026, 10:12 AM" */
+const fmtWhen = (ts) => (ts ? new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+const initialsOf = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+const hueOf = (str) => { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+
+function codeForm(buttonLabel) {
+  return `
+    <label class="field"><span>Enrollment code</span>
+      <input class="input mono" id="org-code" placeholder="ABCD-2345" maxlength="12" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:.06em"></label>
+    <div class="form-error" id="org-err" style="margin-top:10px"></div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn primary" id="org-connect">${icon('building', 14)} ${buttonLabel}</button></div>`;
+}
+
+function person(name, email, dept, location, extra = '') {
+  return `
+    <div class="dev-hero">
+      <span class="dev-avatar" style="--h:${hueOf(name)}">${esc(initialsOf(name))}</span>
+      <div style="min-width:0;flex:1">
+        <div class="dev-name">${esc(name)}</div>
+        <div class="muted">${icon('mail', 13)} ${esc(email)}</div>
+        <div class="dev-chips">${dept ? `<span class="pill">${icon('building', 11)} ${esc(dept)}</span>` : ''}${location ? `<span class="pill">${esc(location)}</span>` : ''}</div>
+      </div>
+      ${extra}
+    </div>`;
+}
+
+function item(label, value, mono = false) {
+  return `<div class="dev-item"><div class="label">${label}</div><div class="value ${mono ? 'mono' : ''}">${value || '<span class="muted">—</span>'}</div></div>`;
+}
+
+function connectedBody(org) {
+  const dev = org.device || {};
   return `
     <section class="card">
-      <div class="card-head"><h3>Connect to Proglint</h3></div>
-      ${org.revoked ? `<div class="banner warn" style="margin-bottom:14px"><span class="bi">${icon('alert', 16)}</span><div class="bt">${esc(org.lastError || 'This laptop was disconnected by your admin.')}</div></div>` : ''}
-      <p class="muted" style="margin:0 0 14px">Your Proglint admin gives you a server address and a one-time enrollment code for this laptop.</p>
-      <div class="form-grid">
-        <label class="field"><span>Server address</span><input class="input mono" id="org-server" placeholder="192.168.1.20:4870" value="${esc(org.server || '')}"></label>
-        <label class="field"><span>Enrollment code</span><input class="input mono" id="org-code" placeholder="ABCD-2345" maxlength="12" style="text-transform:uppercase;letter-spacing:.06em"></label>
+      <div class="card-head"><h3>Assigned to</h3>
+        <span class="status-line ${org.online ? 'ok' : 'bad'}">${icon(org.online ? 'check' : 'wifi', 14)} ${org.online ? 'Connected to Proglint' : 'Offline — data is saved and will be sent later'}</span></div>
+      ${person(org.employeeName, org.employeeEmail, org.department, org.location, `<button class="btn sm" id="org-sync">${icon('refresh', 13)} Sync now</button>`)}
+    </section>
+    <section class="card">
+      <div class="card-head"><h3>Asset details</h3></div>
+      <div class="dev-grid">
+        ${item('Asset ID', org.assetId ? `<span class="idpill">${esc(org.assetId)}</span>` : '')}
+        ${item('Device type', esc(org.deviceType))}
+        ${item('Computer name', esc(dev.hostname))}
+        ${item('Operating system', esc(dev.os))}
+        ${item('Agent version', esc(dev.agentVersion))}
+        ${item('Connected since', esc(fmtWhen(org.connectedAt)))}
+        ${item('Last sync', org.lastSync ? esc(rel(org.lastSync)) : '')}
+        ${item('Waiting to send', org.pendingAlerts ? `${org.pendingAlerts} weekend answer${org.pendingAlerts === 1 ? '' : 's'}` : 'Nothing')}
       </div>
-      <div class="form-error" id="org-err" style="margin-top:10px"></div>
-      <div style="display:flex;justify-content:flex-end"><button class="btn primary" id="org-connect">${icon('building', 14)} Connect</button></div>
+      ${org.lastError ? `<div class="banner warn" style="margin-top:14px"><span class="bi">${icon('wifi', 16)}</span><div class="bt">${esc(org.lastError)}</div></div>` : ''}
     </section>`;
+}
+
+function removedBody(org) {
+  const r = org.removed;
+  return `
+    <section class="card removed">
+      <div class="removed-head">
+        <span class="removed-icon">${icon('alert', 26)}</span>
+        <div>
+          <h2>This laptop was removed from Proglintor</h2>
+          <p class="muted">Your admin removed this laptop on <b>${esc(fmtWhen(r.at))}</b>. Nothing is being sent to Proglint, and any answers that were waiting to be sent were discarded. Your own usage history stays on this laptop.</p>
+        </div>
+      </div>
+      <div class="removed-was"><div class="eyebrow">It was assigned to</div>${person(r.employeeName || 'Unknown', r.employeeEmail || '', r.department, r.location)}
+        <div class="dev-grid" style="margin-top:12px">${item('Asset ID', r.assetId ? `<span class="idpill">${esc(r.assetId)}</span>` : '')}${item('Removed', esc(fmtWhen(r.at)))}</div></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h3>Reconnect this laptop</h3></div>
+      <p class="muted" style="margin:0 0 14px">To use this laptop with Proglintor again, ask your admin for a new enrollment code.</p>
+      ${codeForm('Reconnect')}
+    </section>`;
+}
+
+function connectBody() {
+  return `
+    <section class="card">
+      <div class="empty" style="padding:30px 10px 10px"><div class="ei">${icon('monitor', 26)}</div><b>Connect this laptop to Proglintor</b>
+        Enter the one-time enrollment code your Proglint admin gave you.</div>
+      <div style="max-width:420px;margin:0 auto 18px">${codeForm('Connect')}</div>
+    </section>`;
+}
+
+async function loadDevice() {
+  const org = await agent.orgStatus();
+  if (state.page !== 'device') return;
+  if (document.activeElement?.id === 'org-code') return; // don't wipe what is being typed
+  const sub = org.enrolled ? 'Who this laptop is assigned to, and its details' : org.removed ? 'Removed by your admin' : 'Not connected yet';
+  view.innerHTML = `
+    <header class="topbar"><div><h1>My Device</h1><div class="sub">${sub}</div></div></header>
+    <div class="content device">${org.enrolled ? connectedBody(org) : org.removed ? removedBody(org) : connectBody()}</div>`;
+  bindOrgCard();
 }
 
 function bindOrgCard() {
   $('#org-sync')?.addEventListener('click', async (e) => {
     e.currentTarget.disabled = true;
     await agent.syncNow();
-    loadSettings();
+    loadDevice();
   });
+  $('#org-code')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#org-connect').click(); });
+  $('#org-code')?.addEventListener('input', () => { $('#org-err').textContent = ''; });
   $('#org-connect')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
+    const label = btn.innerHTML;
     btn.disabled = true;
     btn.textContent = 'Connecting…';
-    const r = await agent.enroll($('#org-server').value, $('#org-code').value);
+    const r = await agent.enroll($('#org-code').value);
     if (!r.ok) {
       $('#org-err').textContent = r.error;
       btn.disabled = false;
-      btn.innerHTML = `${icon('building', 14)} Connect`;
+      btn.innerHTML = label;
       return;
     }
     await refreshStatus();
-    loadSettings();
+    loadDevice();
   });
 }
 
@@ -649,6 +703,7 @@ function go(page) {
   Charts.hideTip();
   if (page === 'overview') loadOverview();
   else if (page === 'apps') loadApps();
+  else if (page === 'device') loadDevice();
   else loadSettings();
 }
 $$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.page)));
@@ -685,6 +740,8 @@ setInterval(() => {
 }, 1000);
 
 let refreshTimer = null;
+agent.onNavigate?.(() => go('device')); // clicking the "removed" notification
+
 agent.onUpdate((kind) => {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(async () => {
@@ -693,6 +750,8 @@ agent.onUpdate((kind) => {
     if (state.page === 'overview' && state.data?.isCurrent && !state.drawer) {
       const d = await agent.rangeView(state.range, state.anchor);
       if (state.page === 'overview') { state.data = d; renderOverview(); }
+    } else if (state.page === 'device') {
+      loadDevice(); // e.g. the admin removed this laptop
     } else if (state.drawer && kind === 'tick' && isToday(state.drawer.day)) {
       renderDrawer();
     }

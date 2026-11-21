@@ -101,9 +101,15 @@ class UsageStore {
   save() {
     if (!this.dirty) return;
     const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.db));
-    fs.renameSync(tmp, this.file);
-    this.dirty = false;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true }); // recreated if someone deleted the folder
+      fs.writeFileSync(tmp, JSON.stringify(this.db));
+      fs.renameSync(tmp, this.file);
+      this.dirty = false;
+    } catch (err) {
+      // Never crash the always-running agent over a failed save; try again at the next interval.
+      console.error(`Could not save usage data: ${err.message}`);
+    }
   }
 
   clearAll() {

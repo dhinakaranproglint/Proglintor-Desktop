@@ -47,6 +47,7 @@ function migrateLegacy() {
 }
 
 async function init() {
+  if (IS_MAC && !app.isPackaged) app.dock?.setIcon(nativeImage.createFromPath(path.join(ASSETS, 'icons', 'admin-mac.png'))); // dev runs: show the Proglintor Admin icon in the Dock
   migrateLegacy();
   backend = new Backend(path.join(app.getPath('userData'), 'backend.json'));
   registerIpc();
@@ -129,7 +130,7 @@ function showWindow() {
     return;
   }
   const chrome = IS_MAC
-    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 20 }, vibrancy: 'sidebar', visualEffectState: 'followWindow', backgroundColor: '#00000000' }
+    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 20 }, backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e1015' : '#f5f6fa' }
     : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#111318' : '#f6f7fb', autoHideMenuBar: true, ...(IS_WIN ? { backgroundMaterial: 'mica' } : {}) };
   win = new BrowserWindow({
     width: 1360,
@@ -137,7 +138,7 @@ function showWindow() {
     minWidth: 1080,
     minHeight: 680,
     title: brand.adminName,
-    icon: path.join(ASSETS, 'admin-icon.png'),
+    icon: path.join(ASSETS, 'icons', 'admin.png'),
     show: false,
     ...chrome,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -186,6 +187,7 @@ function serverInfo() {
     url,
     local,
     user: backend.user,
+    lastLogin: backend.lastLogin,
     addresses: url ? [{ name: local ? 'This computer only' : 'Backend', address: url.replace(/^http:\/\//, '') }] : [],
   };
 }
@@ -217,12 +219,18 @@ function registerIpc() {
 
   // Auth
   ipcMain.handle('auth:status', () => serverInfo());
-  form('auth:login', async (_e, url, username, password) => {
-    const user = await backend.login(url, username, password);
-    seenAlerts = null;
-    poll();
-    return user;
+  /** Sign-in forms: { ok, data } or { ok: false, error, field, needsSetup }. */
+  const authForm = (channel, fn) => ipcMain.handle(channel, async (...args) => {
+    try { return { ok: true, data: await fn(...args) }; } catch (err) {
+      return { ok: false, error: err.message, field: err.field || null, needsSetup: Boolean(err.needsSetup), network: Boolean(err.network) };
+    }
   });
+  const signedIn = (user) => { seenAlerts = null; poll(); return user; };
+  authForm('auth:check', (_e, url) => backend.check(url));
+  authForm('auth:login', async (_e, url, login, password) => signedIn(await backend.login(url, login, password)));
+  authForm('auth:setup', async (_e, url, form) => signedIn(await backend.setup(url, form)));
+  authForm('auth:forgot', (_e, url, login) => backend.forgot(url, login));
+  authForm('auth:reset', async (_e, url, login, code, password) => signedIn(await backend.reset(url, login, code, password)));
   handle('auth:logout', async () => { await backend.logout(); seenAlerts = null; newAlertCount = 0; updateBadge(); return true; });
 
   // Data
@@ -232,7 +240,7 @@ function registerIpc() {
   form('assets:create', async (_e, data) => { const a = await backend.post('/api/admin/assets', data); send('admin:update'); return a; });
   form('assets:update', async (_e, id, data) => { const a = await backend.patch(`/api/admin/assets/${enc(id)}`, data); send('admin:update'); return a; });
   handle('assets:delete', async (_e, id) => {
-    if (!(await confirm(`Delete asset ${id}?`, 'Its usage history and alerts are deleted, and the laptop is disconnected. This cannot be undone.', 'Delete'))) return false;
+    if (!(await confirm(`Delete asset ${id}?`, 'Its usage history and alerts are deleted. Within about 30 seconds the Proglintor app on that laptop shows that it was removed and stops sending data. This cannot be undone.', 'Delete'))) return false;
     await backend.delete(`/api/admin/assets/${enc(id)}`);
     send('admin:update');
     return true;
@@ -250,6 +258,20 @@ function registerIpc() {
 
   handle('policy:get', () => backend.get('/api/admin/policy'));
   handle('policy:set', (_e, p) => backend.put('/api/admin/policy', p));
+
+  // App icons uploaded by agents. Found icons are cached; misses are retried after 2 minutes.
+  const iconCache = new Map(); // id -> { url, at }
+  ipcMain.handle('icons:get', async (_e, ids) => {
+    try {
+      const wanted = (ids || []).map(String).filter((id) => { const c = iconCache.get(id); return !c || (!c.url && Date.now() - c.at > 120000); });
+      for (let i = 0; i < wanted.length; i += 100) {
+        const chunk = wanted.slice(i, i + 100);
+        const r = await backend.post('/api/admin/icons', { ids: chunk });
+        for (const id of chunk) iconCache.set(id, { url: r.icons?.[id] || null, at: Date.now() });
+      }
+    } catch { /* offline or signed out: letters are shown */ }
+    return Object.fromEntries((ids || []).map((id) => [id, iconCache.get(String(id))?.url || null]));
+  });
 
   handle('server:info', () => serverInfo());
 

@@ -82,6 +82,11 @@ const UI = (() => {
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
     monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
     wifi: '<path d="M5 12.6a10 10 0 0 1 14 0"/><path d="M8.5 16.1a5 5 0 0 1 7 0"/><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M12 20h.01"/>',
+    server: '<rect x="3" y="3" width="18" height="7.5" rx="2"/><rect x="3" y="13.5" width="18" height="7.5" rx="2"/><path d="M7 6.75h.01M7 17.25h.01"/><path d="M11 6.75h6M11 17.25h6"/>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="M22 7l-10 6L2 7"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c6.5 0 10 8 10 8a17.6 17.6 0 0 1-2.4 3.4M6.6 6.6A17 17 0 0 0 2 12s3.5 8 10 8a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.1 14.1a3 3 0 0 1-4.2-4.2"/><path d="M2 2l20 20"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
     dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
@@ -109,12 +114,18 @@ const UI = (() => {
     return ph;
   }
 
+  const missUntil = new Map(); // key -> time before which we don't ask again (icon may be uploaded later)
+
   async function hydrate(root = document) {
     for (const el of root.querySelectorAll('[data-icon-key]')) {
       const key = el.dataset.iconKey;
-      if (iconCache.has(key) && !iconCache.get(key)) continue; // known: no icon, keep letter
+      if ((missUntil.get(key) || 0) > Date.now()) continue; // no icon yet: keep the letter for now
       if (!pending.has(key)) {
-        pending.set(key, agent.icon(el.dataset.iconId, el.dataset.iconPath).then((u) => { iconCache.set(key, u); pending.delete(key); return u; }));
+        pending.set(key, agent.icon(el.dataset.iconId, el.dataset.iconPath).then((u) => {
+          if (u) iconCache.set(key, u); else missUntil.set(key, Date.now() + 90 * 1000);
+          pending.delete(key);
+          return u;
+        }));
       }
       const u = await pending.get(key);
       if (u && el.isConnected) {

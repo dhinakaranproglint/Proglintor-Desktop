@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('agent', {
   showWindow: () => ipcRenderer.invoke('window:show'),
   // Proglint organization
   orgStatus: () => ipcRenderer.invoke('org:status'),
-  enroll: (server, code) => ipcRenderer.invoke('org:enroll', server, code),
+  enroll: (code) => ipcRenderer.invoke('org:enroll', code),
   syncNow: () => ipcRenderer.invoke('org:sync'),
   // Weekend work check
   warningInfo: () => ipcRenderer.invoke('warning:info'),
@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('agent', {
   warningClose: () => ipcRenderer.invoke('warning:close'),
   quit: () => ipcRenderer.invoke('app:quit'),
   /** Called when the current app/state changes (instant) or periodically (running totals). */
+  onNavigate: (fn) => ipcRenderer.on('agent:navigate', () => fn()),
   onUpdate: (fn) => {
     ipcRenderer.on('agent:update', () => fn('update'));
     ipcRenderer.on('agent:tick', () => fn('tick'));

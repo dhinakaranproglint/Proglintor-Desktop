@@ -32,6 +32,7 @@ class Backend {
   get url() { return this.cfg.url || ''; }
   get loggedIn() { return Boolean(this.cfg.url && this.cfg.token); }
   get user() { return this.cfg.user || null; }
+  get lastLogin() { return this.cfg.lastLogin || this.cfg.user?.email || ''; }
 
   _save() { fs.writeFileSync(this.file, JSON.stringify(this.cfg, null, 2), { mode: 0o600 }); }
 
@@ -76,24 +77,71 @@ class Backend {
   put(path, body) { return this.request('PUT', path, body); }
   delete(path) { return this.request('DELETE', path); }
 
-  async login(url, username, password) {
+  /** Unauthenticated call; returns { status, data } and records reachability. */
+  async _public(url, path, method = 'GET', body = null) {
     const base = normalizeUrl(url);
-    const res = await this._fetch(base, '/api/admin/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+    const res = await this._fetch(base, path, {
+      method,
+      headers: body ? { 'content-type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || (res.status === 404 ? `${base} is not a Proglintor backend` : `Sign-in failed (${res.status})`));
-    this.cfg = { url: base, token: data.token, user: data.user };
+    return { base, status: res.status, ok: res.ok, data };
+  }
+
+  /** Is this a Proglintor backend, and does it still need its first admin? */
+  async check(url) {
+    const health = await this._public(url, '/api/health');
+    if (!health.ok || !String(health.data.service || '').includes('backend')) {
+      throw new Error(`${health.base} answered, but it isn't a Proglintor backend.`);
+    }
+    const setup = await this._public(url, '/api/admin/setup');
+    return { url: health.base, needsSetup: Boolean(setup.data.needsSetup), setupAllowed: Boolean(setup.data.allowed) };
+  }
+
+  _fail(r) {
+    const msg = r.data.error || (r.status === 404 ? `${r.base} is not a Proglintor backend` : `Request failed (${r.status})`);
+    return Object.assign(new Error(msg), { field: r.data.field, needsSetup: r.data.needsSetup });
+  }
+
+  _store(base, data) {
+    this.cfg = { url: base, token: data.token, user: data.user, lastLogin: data.user.email || data.user.username };
     this._save();
     return this.user;
   }
 
+  async login(url, login, password) {
+    const r = await this._public(url, '/api/admin/login', 'POST', { login, password });
+    if (!r.ok) throw this._fail(r);
+    return this._store(r.base, r.data);
+  }
+
+  async setup(url, form) {
+    const r = await this._public(url, '/api/admin/setup', 'POST', form);
+    if (!r.ok) throw this._fail(r);
+    return this._store(r.base, r.data);
+  }
+
+  async forgot(url, login) {
+    const r = await this._public(url, '/api/admin/password/forgot', 'POST', { login });
+    if (!r.ok) throw this._fail(r);
+    return r.data.message;
+  }
+
+  async reset(url, login, code, password) {
+    const r = await this._public(url, '/api/admin/password/reset', 'POST', { login, code, password });
+    if (!r.ok) throw this._fail(r);
+    return this.login(url, login, password); // sign straight in with the new password
+  }
+
+  /** Signs out locally right away; the server is told in the background (a slow or offline server can't block it). */
   async logout() {
-    try { await this.post('/api/admin/logout'); } catch { /* signing out locally is enough */ }
-    this.cfg = { url: this.cfg.url };
+    const { url, token, lastLogin } = this.cfg;
+    this.cfg = { url, lastLogin };
     this._save();
+    if (url && token) {
+      fetch(`${url}/api/admin/logout`, { method: 'POST', headers: { authorization: `Token ${token}` }, signal: AbortSignal.timeout(5000) }).catch(() => {});
+    }
   }
 }
 

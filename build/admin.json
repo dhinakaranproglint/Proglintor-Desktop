@@ -19,13 +19,13 @@
       "zip"
     ],
     "category": "public.app-category.business",
-    "icon": "assets/admin-icon.png"
+    "icon": "assets/icons/admin.icns"
   },
   "win": {
     "target": [
       "nsis"
     ],
-    "icon": "assets/admin-icon.png"
+    "icon": "assets/icons/admin.ico"
   },
   "nsis": {
     "oneClick": false,
@@ -39,7 +39,7 @@
       "deb"
     ],
     "category": "Office",
-    "icon": "assets/admin-icon.png",
+    "icon": "assets/icons/admin.png",
     "maintainer": "Proglint IT <it@proglint.com>",
     "executableName": "proglintor-admin"
   }

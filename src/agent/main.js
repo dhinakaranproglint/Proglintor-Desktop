@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Tray, Menu, ipcMain, powerMonitor, dialog, shell, nativeImage, nativeTheme, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, powerMonitor, dialog, shell, nativeImage, nativeTheme, screen, Notification } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -39,11 +39,16 @@ let tray = null;
 let store, tracker, catalog, settings, sync;
 let warnWin = null;
 let quitting = false;
+/** Installed builds can't be quit by the user; only shutdown, restart or logout (or development runs) end the agent. */
+let systemQuit = false;
+const MANAGED = app.isPackaged;
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit(); // another copy is already running
 } else {
-  app.on('second-instance', showWindow);
+  // A second launch (e.g. by the auto-start service) just stays in the background.
+  app.on('second-instance', (_e, argv) => { if (!argv.includes('--hidden')) showWindow(); });
   app.whenReady().then(init);
 }
 
@@ -52,8 +57,10 @@ if (!app.requestSingleInstanceLock()) {
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
-  try { return { idleThreshold: 300, paused: false, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; }
-  catch { return { idleThreshold: 300, paused: false }; }
+  let saved = {};
+  try { saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { /* defaults */ }
+  delete saved.paused; // tracking can't be paused
+  return { idleThreshold: 300, ...saved };
 }
 
 function saveSettings() {
@@ -63,11 +70,54 @@ function saveSettings() {
 const linuxAutostartFile = () => path.join(os.homedir(), '.config', 'autostart', 'proglintor.desktop');
 
 function getOpenAtLogin() {
+  if (IS_MAC && MANAGED) return fs.existsSync(launchAgentFile());
   if (process.platform === 'linux') return fs.existsSync(linuxAutostartFile());
   return app.getLoginItemSettings().openAtLogin;
 }
 
+const launchAgentFile = () => path.join(os.homedir(), 'Library', 'LaunchAgents', `${brand.agentAppId}.plist`);
+
+/**
+ * macOS: a per-user LaunchAgent starts the agent at login and restarts it if it crashes or is
+ * force-quit (KeepAlive on unsuccessful exit). A normal exit at shutdown/logout is not restarted.
+ */
+function installLaunchAgent() {
+  const exe = process.execPath.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${brand.agentAppId}</string>
+  <key>ProgramArguments</key><array><string>${exe}</string><string>--hidden</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+`;
+  const file = launchAgentFile();
+  let current = '';
+  try { current = fs.readFileSync(file, 'utf8'); } catch { /* not installed */ }
+  if (current === plist) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, plist);
+  // Register it now too; the copy launchd starts exits right away because this one is already running.
+  // (Skipped for isolated test runs that use their own data folder.)
+  if (!process.env.PULSE_USER_DATA) spawn('launchctl', ['bootstrap', `gui/${process.getuid()}`, file], { stdio: 'ignore' }).on('error', () => {});
+  // The LaunchAgent replaces the older login item.
+  app.setLoginItemSettings({ openAtLogin: false });
+}
+
+/** Makes sure the agent starts whenever the computer is turned on and the user signs in. */
+function ensureAutostart() {
+  if (!MANAGED) return;
+  if (IS_MAC) installLaunchAgent();
+  else if (!getOpenAtLogin()) setOpenAtLogin(true);
+}
+
 function setOpenAtLogin(enabled) {
+  if (IS_MAC && MANAGED) return; // handled by the LaunchAgent
   if (process.platform !== 'linux') {
     app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true, args: ['--hidden'] });
     return;
@@ -138,6 +188,7 @@ async function runningApps() {
 
 async function init() {
   settings = loadSettings();
+  setDockIcon();
   migrateLegacy();
   store = new UsageStore(app.getPath('userData'));
   store.mergeApps(SELF_ALIASES, SELF); // tidy up entries from older versions
@@ -156,7 +207,6 @@ async function init() {
   });
   tracker.onUpdate = (st) => { broadcast('agent:update'); updateTray(); checkWeekend(st.current); };
   tracker.start();
-  if (settings.paused) tracker.pause('user');
 
   sync = new Sync({
     dir: app.getPath('userData'),
@@ -165,19 +215,23 @@ async function init() {
     runningApps,
     installedApps: async () => { if (catalog.scanning) await catalog.scanning; return catalog.apps; },
     device,
+    iconFor,
+    defaultServer: brand.serverUrl(),
     onChange: () => broadcast('agent:update'),
+    onRemoved: onAssetRemoved,
   });
   sync.start();
   setInterval(() => checkWeekend(tracker.status().current), 60 * 1000);
 
-  // Company-managed: always start with the computer (packaged builds only).
-  if (app.isPackaged && !getOpenAtLogin()) setOpenAtLogin(true);
+  // Company-managed: always start with the computer (installed builds).
+  ensureAutostart();
 
   powerMonitor.on('suspend', () => tracker.pause('sleep'));
   powerMonitor.on('resume', () => tracker.resume('sleep'));
   powerMonitor.on('lock-screen', () => tracker.pause('lock'));
   powerMonitor.on('unlock-screen', () => tracker.resume('lock'));
-  powerMonitor.on('shutdown', () => tracker.stop());
+  // Shutdown, restart or logout: let the agent exit normally.
+  powerMonitor.on('shutdown', () => { systemQuit = true; tracker.stop(); });
 
   registerIpc();
   createTray();
@@ -187,14 +241,43 @@ async function init() {
   setInterval(() => broadcast('agent:tick'), 10000); // let open views refresh running totals
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (e) => {
+  // Installed agent: Cmd+Q / Alt+F4 / "Quit" from the Dock only hide it; it keeps tracking in the background.
+  if (MANAGED && !systemQuit && gotLock) {
+    e.preventDefault();
+    hideToBackground();
+    return;
+  }
   quitting = true;
   tracker?.stop();
 });
+// Windows sends this at logout/shutdown.
+app.on('session-end', () => { systemQuit = true; });
+
+/** Closes the windows but keeps the agent running (menu bar / system tray only). */
+function hideToBackground() {
+  win?.hide();
+  popover?.hide();
+  if (IS_MAC) app.dock?.hide();
+}
 
 // Keep running in the tray / menu bar when the window is closed.
 app.on('window-all-closed', () => {});
 app.on('activate', showWindow);
+
+/** The admin deleted this laptop's asset (or issued a new code): tell the employee and refresh the UI. */
+function onAssetRemoved(st) {
+  broadcast('agent:update');
+  updateTray();
+  if (Notification.isSupported()) {
+    const n = new Notification({
+      title: 'This laptop was removed from Proglintor',
+      body: `${st.removed?.assetId ? `Asset ${st.removed.assetId} was` : 'Its asset was'} removed by your admin. Nothing is being sent to Proglint. Open Proglintor to reconnect.`,
+    });
+    n.on('click', () => { showWindow(); broadcast('agent:navigate'); });
+    n.show();
+  }
+}
 
 function broadcast(channel) {
   for (const w of [win, popover]) if (w && !w.isDestroyed()) w.webContents.send(channel);
@@ -202,7 +285,14 @@ function broadcast(channel) {
 
 // ---- main window -----------------------------------------------------------------------
 
+/** Development runs use Electron's own bundle, so the Dock icon is set explicitly (installed builds use the bundle's icon.icns). */
+function setDockIcon() {
+  if (IS_MAC && !app.isPackaged) app.dock?.setIcon(nativeImage.createFromPath(path.join(ASSETS, 'icons', 'agent-mac.png')));
+}
+
 function showWindow() {
+  if (IS_MAC) { app.dock?.show(); setDockIcon(); }
+  sync?.heartbeat().catch(() => {}); // so an admin's change (e.g. a deleted asset) is visible as soon as the window opens
   if (win) {
     if (win.isMinimized()) win.restore();
     win.show();
@@ -218,7 +308,7 @@ function showWindow() {
     minWidth: 1000,
     minHeight: 660,
     title: brand.agentName,
-    icon: path.join(ASSETS, 'icon.png'),
+    icon: path.join(ASSETS, 'icons', 'agent.png'),
     show: false,
     ...chrome,
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -227,7 +317,7 @@ function showWindow() {
   win.once('ready-to-show', () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.on('close', (e) => {
-    if (!quitting) { e.preventDefault(); win.hide(); }
+    if (!quitting) { e.preventDefault(); hideToBackground(); }
   });
   win.on('closed', () => { win = null; });
 }
@@ -265,14 +355,11 @@ function trayMenu() {
     ...(view.summaries.length ? [{ type: 'separator' }, ...view.summaries.slice(0, 5).map((s) => ({ label: `${s.name} — ${fmt(s.seconds)}`, enabled: false }))] : []),
     { type: 'separator' },
     { label: 'Open Dashboard', click: showWindow },
-    { label: tracker.paused ? 'Resume Tracking' : 'Pause Tracking', click: () => togglePause() },
-    { type: 'separator' },
-    { label: `Quit ${brand.agentName}`, click: () => app.quit() },
   ]);
 }
 
 function stateLabel(st) {
-  return { tracking: 'Tracking', idle: 'Idle', locked: 'Screen locked', paused: tracker.paused ? 'Paused' : 'Paused (sleep)', unavailable: 'Detection unavailable', starting: 'Starting…' }[st.state] || st.state;
+  return { tracking: 'Tracking', idle: 'Idle', locked: 'Screen locked', paused: 'Paused (sleep)', unavailable: 'Detection unavailable', starting: 'Starting…' }[st.state] || st.state;
 }
 
 function updateTray() {
@@ -319,14 +406,6 @@ function togglePopover() {
   popover.webContents.send('agent:update');
   popover.show();
   popover.focus();
-}
-
-function togglePause(force) {
-  const pause = force ?? !tracker.paused;
-  if (pause) tracker.pause('user'); else tracker.resume('user');
-  settings.paused = pause;
-  saveSettings();
-  updateTray();
 }
 
 // ---- icons ---------------------------------------------------------------------------
@@ -473,9 +552,9 @@ function statusPayload() {
 function registerIpc() {
 
   // Organization (Proglint server)
-  ipcMain.handle('org:status', () => sync.status());
-  ipcMain.handle('org:enroll', async (_e, server, code) => {
-    try { return { ok: true, status: await sync.enroll(server, code) }; } catch (err) { return { ok: false, error: err.message }; }
+  ipcMain.handle('org:status', () => ({ ...sync.status(), device: device() }));
+  ipcMain.handle('org:enroll', async (_e, code) => {
+    try { return { ok: true, status: await sync.enroll(code) }; } catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('org:sync', async () => {
     try { await sync.syncNow(); return { ok: true }; } catch (err) { return { ok: false, error: err.message }; }
@@ -556,7 +635,6 @@ function registerIpc() {
       settings.idleThreshold = patch.idleThreshold;
       tracker.idleThreshold = patch.idleThreshold;
     }
-    if (typeof patch.paused === 'boolean') togglePause(patch.paused);
     if (typeof patch.openAtLogin === 'boolean') setOpenAtLogin(patch.openAtLogin);
     saveSettings();
     broadcast('agent:update');
@@ -612,7 +690,7 @@ function registerIpc() {
 
   ipcMain.handle('data:folder', () => shell.showItemInFolder(store.file));
   ipcMain.handle('window:show', () => { popover?.hide(); showWindow(); });
-  ipcMain.handle('app:quit', () => app.quit());
+  ipcMain.handle('app:quit', () => { hideToBackground(); return false; }); // the agent can't be quit from its UI
 
   ipcMain.handle('app:open', (_e, p) => {
     if (!knownPath(p)) return false;

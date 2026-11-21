@@ -13,7 +13,11 @@ const call = (ch) => async (...args) => {
 contextBridge.exposeInMainWorld('admin', {
   // Sign-in to the Django backend
   authStatus: call('auth:status'),
-  login: (url, username, password) => ipcRenderer.invoke('auth:login', url, username, password),
+  checkBackend: (url) => ipcRenderer.invoke('auth:check', url),
+  login: (url, login, password) => ipcRenderer.invoke('auth:login', url, login, password),
+  setupAdmin: (url, form) => ipcRenderer.invoke('auth:setup', url, form),
+  forgotPassword: (url, login) => ipcRenderer.invoke('auth:forgot', url, login),
+  resetPassword: (url, login, code, password) => ipcRenderer.invoke('auth:reset', url, login, code, password),
   logout: call('auth:logout'),
   // Data
   dashboard: call('dash:get'),
@@ -37,5 +41,22 @@ contextBridge.exposeInMainWorld('admin', {
   onAuthRequired: (fn) => ipcRenderer.on('admin:auth', (_e, msg) => fn(msg)),
 });
 
-// The shared UI helpers expect `agent.icon` / `agent.platform`; remote apps have no local icon.
-contextBridge.exposeInMainWorld('agent', { icon: async () => null, platform: process.platform });
+// The shared UI helpers expect `agent.icon(id)`: icons come from the backend, fetched in batches.
+let queue = [];
+let timer = null;
+function icon(id) {
+  return new Promise((resolve) => {
+    queue.push({ id, resolve });
+    if (!timer) {
+      timer = setTimeout(async () => {
+        const batch = queue;
+        queue = [];
+        timer = null;
+        let icons = {};
+        try { icons = await ipcRenderer.invoke('icons:get', [...new Set(batch.map((b) => b.id))]); } catch { /* show letters */ }
+        for (const b of batch) b.resolve(icons?.[b.id] || null);
+      }, 40);
+    }
+  });
+}
+contextBridge.exposeInMainWorld('agent', { icon, platform: process.platform });

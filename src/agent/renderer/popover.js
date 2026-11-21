@@ -40,13 +40,9 @@ async function render() {
     </div>
     <div class="foot">
       <button class="btn primary" id="open">${icon('overview', 14)} Open Dashboard</button>
-      <button class="btn" id="pause" title="${st.paused ? 'Resume' : 'Pause'} tracking">${icon(st.paused ? 'play' : 'pause', 14)}</button>
-      <button class="btn" id="quit" title="Quit Proglintor">${icon('power', 14)}</button>
     </div>`;
 
   document.getElementById('open').onclick = () => agent.showWindow();
-  document.getElementById('pause').onclick = async () => { await agent.setSettings({ paused: !status.paused }); render(); };
-  document.getElementById('quit').onclick = () => agent.quit();
   hydrate(document);
 }
 

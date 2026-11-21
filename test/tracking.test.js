@@ -114,3 +114,13 @@ test('tracker: stops counting at last input when idle, and while locked or pause
     assert.equal(h.secs(A), 90, 'paused time not counted');
   } finally { h.restore(); }
 });
+
+test('store: saving survives a deleted data folder (recreates it, never throws)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-test-'));
+  const s = new UsageStore(dir);
+  s.recordForeground(A, Date.now() - 60000, Date.now());
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.doesNotThrow(() => s.save());
+  assert.ok(fs.existsSync(path.join(dir, 'usage.json')), 'folder and file are recreated');
+  assert.equal(s.dirty, false);
+});
