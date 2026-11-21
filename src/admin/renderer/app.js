@@ -493,7 +493,7 @@ function offlineBanner(err) {
 
 // ---- navigation & live updates ------------------------------------------------------------------
 
-const PAGES = { dashboard: renderDashboard, assets: renderAssets, approvals: renderApprovals, software: renderSoftware, alerts: renderAlerts, policies: renderPolicies, settings: renderSettings };
+const PAGES = { dashboard: renderDashboard, assets: renderAssets, approvals: renderApprovals, software: renderSoftware, tasks: renderTasks, recognition: renderRecognition, team: renderTeam, alerts: renderAlerts, policies: renderPolicies, settings: renderSettings };
 
 function go(page) {
   closeDrawer();
@@ -526,6 +526,10 @@ async function refreshSide() {
   const pend = $('#approval-badge');
   pend.hidden = !approvals.length;
   pend.textContent = approvals.length;
+  const recs = info.loggedIn ? (await admin.recognitions('pending').catch(() => ({ items: [] }))).items || [] : [];
+  const rb = $('#rec-badge');
+  rb.hidden = !recs.length;
+  rb.textContent = recs.length;
   state.user = info.user;
   $('#side-server').innerHTML = `
     <span class="srv ${info.running ? 'ok' : 'down'}">${icon('server', 15)}</span>

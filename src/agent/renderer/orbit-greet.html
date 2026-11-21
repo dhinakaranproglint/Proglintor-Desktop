@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Orbit</title>
+  <link rel="stylesheet" href="../../shared/renderer/styles.css">
+  <link rel="stylesheet" href="../../shared/renderer/orbit.css">
+</head>
+<body class="orbit-greet">
+  <div class="og-card" id="card" role="dialog" aria-label="Greeting">
+    <div class="og-top"><canvas id="orb" aria-hidden="true"></canvas>
+      <div><h1 class="og-h" id="hello"></h1><div class="og-name" id="who"></div></div></div>
+    <div class="og-msg" id="msg" aria-live="polite"></div>
+    <div class="og-btns"><button class="btn primary grow" id="go">Let's go</button><button class="btn" id="later">Later</button></div>
+    <div style="text-align:center"><button class="og-link" id="off">Don't greet me when I open my laptop</button></div>
+    <div class="og-timer"></div>
+  </div>
+  <script src="../../shared/renderer/common.js"></script>
+  <script src="../../shared/renderer/orbit-logic.js"></script>
+  <script src="../../shared/renderer/orbit-orb.js"></script>
+  <script src="../../shared/renderer/orbit-sound.js"></script>
+  <script src="orbit-greet.js"></script>
+</body>
+</html>

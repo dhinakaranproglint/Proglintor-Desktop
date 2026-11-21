@@ -9,7 +9,7 @@ document.body.classList.add(`platform-${agent.platform}`);
 let status = null;
 
 async function render() {
-  const [d, st] = await Promise.all([agent.rangeView('day'), agent.status()]);
+  const [d, st, persona, presenting] = await Promise.all([agent.rangeView('day'), agent.status(), agent.orbit.persona().catch(() => ({ show: true, name: 'Orbit' })), agent.orbit.presenting().catch(() => false)]);
   status = st;
   const cur = st.current;
   const max = d.summaries[0]?.seconds || 1;
@@ -39,10 +39,17 @@ async function render() {
         <span class="tm">${fmtDur(s.seconds)}</span></div>`).join('') || '<div class="muted small" style="padding:6px">No activity yet today.</div>'}
     </div>
     <div class="foot">
-      <button class="btn primary" id="open">${icon('overview', 14)} Open Dashboard</button>
+      ${!persona.show ? `<button class="btn primary" id="orbit-show">Show ${esc(persona.name)} on screen</button>`
+        : presenting ? `<button class="btn primary" id="orbit-unpresent">Stop presenting mode (show ${esc(persona.name)})</button>`
+        : `<button class="btn" id="orbit-chat">Chat with ${esc(persona.name)}</button>`}
+      <button class="btn ${persona.show && !presenting ? 'primary' : ''}" id="open">${icon('overview', 14)} Open Dashboard</button>
     </div>`;
 
   document.getElementById('open').onclick = () => agent.showWindow();
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = async () => { await fn(); render(); }; };
+  on('orbit-show', () => agent.orbit.show());
+  on('orbit-unpresent', () => agent.orbit.presenting(false));
+  on('orbit-chat', () => agent.orbit.companionOpen('orbit'));
   hydrate(document);
 }
 

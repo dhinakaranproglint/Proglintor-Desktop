@@ -586,7 +586,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && st
 
 // The main process tells us the moment something changes (approval, progress, result).
 agent.onSoftware?.(() => { refreshRequests().catch(() => {}); });
-agent.onGoto?.((page) => { if (page === 'install' || page === 'device') go(page); });
+agent.onGoto?.((page) => { if (page === 'install' || page === 'device' || page === 'orbit') go(page); });
 
 // Keep the sidebar badge (open requests) current even when this page isn't showing.
 function updateInstallBadge() {

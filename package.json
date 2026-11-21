@@ -19,7 +19,10 @@
     "dist:agent:linux": "electron-builder --config build/agent.json --linux",
     "dist:admin:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config build/admin.json --mac",
     "dist:admin:win": "electron-builder --config build/admin.json --win",
-    "dist:admin:linux": "electron-builder --config build/admin.json --linux"
+    "dist:admin:linux": "electron-builder --config build/admin.json --linux",
+    "autostart:on": "node scripts/autostart.js on",
+    "autostart:off": "node scripts/autostart.js off",
+    "autostart:status": "node scripts/autostart.js status"
   },
   "devDependencies": {
     "electron": "^45.4.1",

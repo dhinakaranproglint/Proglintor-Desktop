@@ -698,6 +698,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.dr
 
 function go(page) {
   state.page = page;
+  if (page !== 'orbit') OrbitPage.leave();
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   $('.main').scrollTop = 0;
   Charts.hideTip();
@@ -705,6 +706,7 @@ function go(page) {
   else if (page === 'apps') loadApps();
   else if (page === 'device') loadDevice();
   else if (page === 'install') renderInstall();
+  else if (page === 'orbit') OrbitPage.render();
   else loadSettings();
 }
 $$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.page)));
@@ -771,3 +773,19 @@ window.addEventListener('resize', () => {
   state.swift = await agent.swiftCheck();
   go('overview');
 })();
+
+
+// ---- if the companion is hidden, the dashboard always offers the way back --------------------------------
+async function refreshOrbitHidden() {
+  const el = document.getElementById('side-orbit');
+  if (!el) return;
+  const [p, presenting] = await Promise.all([agent.orbit.persona().catch(() => null), agent.orbit.presenting().catch(() => false)]);
+  if (!p) return;
+  const hidden = !p.show || presenting;
+  el.hidden = !hidden;
+  if (hidden) el.textContent = presenting ? `${p.name} is in presenting mode. Show` : `${p.name} is hidden. Show`;
+  el.onclick = async () => { if (presenting) await agent.orbit.presenting(false); if (!p.show) await agent.orbit.show(); refreshOrbitHidden(); };
+}
+agent.orbit.onPersona(refreshOrbitHidden);
+agent.orbit.care.onState(refreshOrbitHidden);
+refreshOrbitHidden();

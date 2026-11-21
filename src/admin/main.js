@@ -28,6 +28,8 @@ let seenAlerts = null; // uids of "new" alerts already notified (null until the 
 let newAlertCount = 0;
 let seenApprovals = null; // ids of software requests waiting for approval that were already notified
 let pendingApprovals = 0;
+let seenRecs = null; // ids of appreciation requests already notified
+let pendingRecs = 0;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -102,6 +104,10 @@ async function poll() {
     const ids = new Set(pending.map((r) => r.id));
     if (seenApprovals) for (const r of pending) if (!seenApprovals.has(r.id)) notifyApproval(r);
     seenApprovals = ids;
+    const recs = (await backend.get('/api/admin/orbit/recognitions?status=pending')).items || [];
+    pendingRecs = recs.length;
+    if (seenRecs) for (const r of recs) if (!seenRecs.has(r.id)) notifyRecognition(r);
+    seenRecs = new Set(recs.map((r) => r.id));
   } catch (err) {
     if (err instanceof AuthError) send('admin:auth');
   }
@@ -130,12 +136,19 @@ function notifyApproval(req) {
   n.show();
 }
 
+function notifyRecognition(rec) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: `Appreciation to review: ${rec.employeeName}`, body: rec.title });
+  n.on('click', () => { showWindow(); send('admin:navigate', 'recognition'); });
+  n.show();
+}
+
 function send(channel, ...args) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
 }
 
 function updateBadge() {
-  const total = newAlertCount + pendingApprovals;
+  const total = newAlertCount + pendingApprovals + pendingRecs;
   if (IS_MAC) app.dock?.setBadge(total ? String(total) : '');
   else app.setBadgeCount?.(total);
   updateTray();
@@ -247,7 +260,7 @@ function registerIpc() {
       return { ok: false, error: err.message, field: err.field || null, needsSetup: Boolean(err.needsSetup), network: Boolean(err.network) };
     }
   });
-  const signedIn = (user) => { seenAlerts = null; seenApprovals = null; poll(); return user; };
+  const signedIn = (user) => { seenAlerts = null; seenApprovals = null; seenRecs = null; poll(); return user; };
   authForm('auth:check', (_e, url) => backend.check(url));
   authForm('auth:login', async (_e, url, login, password) => signedIn(await backend.login(url, login, password)));
   authForm('auth:setup', async (_e, url, form) => signedIn(await backend.setup(url, form)));
@@ -258,6 +271,25 @@ function registerIpc() {
   // Data
   handle('dash:get', async () => ({ ...(await backend.get('/api/admin/dashboard')), server: serverInfo() }));
   handle('assets:list', () => backend.get('/api/admin/assets'));
+
+  // Orbit: tasks, appreciation, team insights
+  const orbitPath = (p) => `/api/admin/orbit/${p}`;
+  const okId = (v) => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
+  handle('orbit:tasks', (_e, q) => backend.get(orbitPath(`tasks?status=${enc((q && q.status) || '')}&asset=${enc((q && q.asset) || '')}`)));
+  form('orbit:task:create', async (_e, data) => { const r = await backend.post(orbitPath('tasks'), data); send('admin:update'); return r; });
+  form('orbit:task:update', async (_e, id, data) => { if (!okId(id)) throw new Error('Unknown task'); const r = await backend.patch(orbitPath(`tasks/${enc(id)}`), data); send('admin:update'); return r; });
+  form('orbit:task:delete', async (_e, id) => { if (!okId(id)) throw new Error('Unknown task'); const r = await backend.delete(orbitPath(`tasks/${enc(id)}`)); send('admin:update'); return r; });
+  handle('orbit:recs', (_e, status) => backend.get(orbitPath(`recognitions?status=${enc(status || '')}`)));
+  form('orbit:rec:decide', async (_e, id, body) => {
+    if (!okId(id)) throw new Error('Unknown request');
+    const r = await backend.post(orbitPath(`recognitions/${enc(id)}/decision`), body);
+    poll();
+    return r;
+  });
+  form('orbit:rec:award', async (_e, body) => { const r = await backend.post(orbitPath('recognitions'), body); poll(); return r; });
+  form('orbit:rec:cert', (_e, id) => { if (!okId(id)) throw new Error('Unknown certificate'); return backend.get(orbitPath(`recognitions/${enc(id)}/certificate`)); });
+  handle('orbit:team', () => backend.get(orbitPath('team')));
+  form('orbit:chat', (_e, messages) => backend.post(orbitPath('chat'), { messages }));
   handle('assets:detail', async (_e, id) => ({ ...(await backend.get(`/api/admin/assets/${enc(id)}`)), server: serverInfo() }));
   form('assets:create', async (_e, data) => { const a = await backend.post('/api/admin/assets', data); send('admin:update'); return a; });
   form('assets:update', async (_e, id, data) => { const a = await backend.patch(`/api/admin/assets/${enc(id)}`, data); send('admin:update'); return a; });

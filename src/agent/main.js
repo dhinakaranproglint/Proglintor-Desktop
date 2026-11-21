@@ -1,9 +1,9 @@
 'use strict';
-const { app, BrowserWindow, Tray, Menu, ipcMain, powerMonitor, dialog, shell, nativeImage, nativeTheme, screen, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, powerMonitor, dialog, shell, nativeImage, nativeTheme, screen, Notification, globalShortcut } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
 const platform = require('./platform');
 const { UsageStore, dayKey } = require('./store');
@@ -12,6 +12,12 @@ const { Catalog } = require('./catalog');
 const { Sync } = require('./sync');
 const { SoftwareAgent } = require('./software');
 const { watchApps } = require('./appwatch');
+const { OrbitAgent, UUID: ORBIT_UUID } = require('./orbit');
+const OrbitLogic = require('../shared/renderer/orbit-logic');
+const CareLogic = require('../shared/renderer/care-logic');
+const { CareCoach } = require('./care');
+const { makeFullscreenProbe } = require('./screenstate');
+const { makeLog } = require('./installlog');
 const { run: runCommand } = require('./platform/util');
 const { isDevTool, isWeekend } = require('../shared/policy');
 const brand = require('../shared/branding');
@@ -39,8 +45,10 @@ const SWIFT_SELF_ID = 'com.local.MachineMonitor';
 let win = null;
 let popover = null;
 let tray = null;
-let store, tracker, catalog, settings, sync, software, appWatch;
+let store, tracker, catalog, settings, sync, software, orbit, care, appWatch;
 let warnWin = null;
+let greetWin = null;
+let companionWin = null;
 let quitting = false;
 /** Installed builds can't be quit by the user; only shutdown, restart or logout (or development runs) end the agent. */
 let systemQuit = false;
@@ -51,7 +59,7 @@ if (!gotLock) {
   app.quit(); // another copy is already running
 } else {
   // A second launch (e.g. by the auto-start service) just stays in the background.
-  app.on('second-instance', (_e, argv) => { if (!argv.includes('--hidden')) showWindow(); });
+  app.on('second-instance', (_e, argv) => { if (!argv.includes('--hidden')) { reviveCompanion(); showWindow(); } });
   app.whenReady().then(init);
 }
 
@@ -63,7 +71,7 @@ function loadSettings() {
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { /* defaults */ }
   delete saved.paused; // tracking can't be paused
-  return { idleThreshold: 300, ...saved };
+  return { idleThreshold: 300, ...saved, orbit: OrbitLogic.sanitizePersona(saved.orbit), care: CareLogic.sanitizeCare(saved.care) };
 }
 
 function saveSettings() {
@@ -249,6 +257,34 @@ async function init() {
     notify: notifyEmployee,
     onChange: () => broadcast('agent:software'),
   });
+  // Orbit: the personal companion (greeting, tasks, achievements, appreciation).
+  orbit = new OrbitAgent({
+    sync,
+    flush: () => sync.pushUsage(),
+    notify: async (t, b) => { if (mustHideCompanion()) return; if (companionVisible() && !(await fullscreenApp().catch(() => ''))) companionWin.webContents.send('agent:orbit-say', { title: t, body: b }); else notifyEmployee(t, b, 'orbit'); },
+    onChange: () => broadcast('agent:orbit'),
+  });
+  care = new CareCoach({
+    dir: app.getPath('userData'),
+    status: () => tracker.status(),
+    fullscreenApp: () => fullscreenApp(),
+    hold: mustHideCompanion,
+    getConfig: () => settings.care,
+    name: () => sync.status().employeeName || '',
+    wrapup: () => orbit.wrapup(),
+    onNudge: deliverCare,
+  });
+  care.start();
+  startPrivacyWatch();
+  setTimeout(applyCompanion, 2500);
+  screen.on('display-metrics-changed', () => applyCompanion());
+  orbit.start();
+  setTimeout(() => whenFree(async () => { if (!(await weekendCheckIn().catch(() => false))) maybeGreet(); }), 9000);
+  powerMonitor.on('lock-screen', markAway);
+  powerMonitor.on('suspend', markAway);
+  const onReturn = () => whenFree(async () => { if (await weekendCheckIn().catch(() => false)) { awaySince = 0; return; } if (!maybeGreet()) welcomeBack().catch(() => {}); });
+  powerMonitor.on('unlock-screen', () => setTimeout(onReturn, 3500));
+  powerMonitor.on('resume', () => setTimeout(onReturn, 7000));
   sync.onSoftwareJobs = () => software.poke();
   // Apps installed or removed (by us, by the employee, by IT): the list follows within seconds.
   if (IS_MAC) appWatch = watchApps(APP_DIRS, async () => { const sig = appsSignature(); await catalog.refresh(); await sync.pushInstalled(); lastAppsSig = sig; });
@@ -289,11 +325,11 @@ async function detectInstalled(spec, installedPath) {
 }
 
 /** Native notification for install updates; skipped while the employee is already looking at the window. */
-function notifyEmployee(title, body) {
+function notifyEmployee(title, body, page = 'install') {
   if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return;
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body });
-  n.on('click', () => { showWindow(); win?.webContents.send('agent:goto', 'install'); });
+  n.on('click', () => { showWindow(); win?.webContents.send('agent:goto', page); });
   n.show();
 }
 
@@ -306,6 +342,8 @@ app.on('before-quit', (e) => {
   }
   quitting = true;
   software?.stop();
+  orbit?.stop();
+  care?.stop();
   appWatch?.close();
   tracker?.stop();
 });
@@ -321,11 +359,13 @@ function hideToBackground() {
 
 // Keep running in the tray / menu bar when the window is closed.
 app.on('window-all-closed', () => {});
-app.on('activate', showWindow);
+app.on('activate', () => { reviveCompanion(); showWindow(); });
 
 /** The admin deleted this laptop's asset (or issued a new code): tell the employee and refresh the UI. */
 function onAssetRemoved(st) {
   software?.reset();
+  orbit?.reset();
+  applyCompanion();
   broadcast('agent:update');
   updateTray();
   if (Notification.isSupported()) {
@@ -339,7 +379,7 @@ function onAssetRemoved(st) {
 }
 
 function broadcast(channel) {
-  for (const w of [win, popover]) if (w && !w.isDestroyed()) w.webContents.send(channel);
+  for (const w of [win, popover, greetWin, companionWin]) if (w && !w.isDestroyed()) w.webContents.send(channel);
 }
 
 // ---- main window -----------------------------------------------------------------------
@@ -414,6 +454,9 @@ function trayMenu() {
     ...(view.summaries.length ? [{ type: 'separator' }, ...view.summaries.slice(0, 5).map((s) => ({ label: `${s.name} — ${fmt(s.seconds)}`, enabled: false }))] : []),
     { type: 'separator' },
     { label: 'Open Dashboard', click: showWindow },
+    { label: 'Chat with Orbit', click: () => { showWindow(); win?.webContents.send('agent:goto', 'orbit'); } },
+    presentingItem(),
+    { label: persona().show ? 'Hide Orbit from screen' : 'Show Orbit on screen', accelerator: OrbitLogic.COMPANION_SHORTCUT, click: toggleCompanion },
   ]);
 }
 
@@ -608,12 +651,378 @@ function statusPayload() {
   };
 }
 
+// ---- Orbit companion (always-on-screen orb) -----------------------------------------------------
+
+const companionVisible = () => Boolean(companionWin && !companionWin.isDestroyed() && companionWin.isVisible());
+
+/** Creates, moves, resizes or closes the floating orb to match the employee's choices. */
+function applyCompanion() {
+  const p = persona();
+  const want = p.show && sync?.enrolled && !sync.status().removed;
+  if (!want) { if (companionWin && !companionWin.isDestroyed()) companionWin.close(); return; }
+  const b = OrbitLogic.placement(p, screen.getPrimaryDisplay().workArea);
+  if (companionWin && !companionWin.isDestroyed()) {
+    companionWin.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+    companionWin.webContents.send('agent:orbit-layout', b);
+    return;
+  }
+  companionWin = new BrowserWindow({
+    x: b.x, y: b.y, width: b.width, height: b.height, show: false, frame: false, transparent: true, resizable: false, minimizable: false,
+    maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true, focusable: false, title: p.name,
+    // A macOS panel stays on screen while another app is active. A normal window only shows while its own app is active,
+    // which is almost never true for a background assistant (it simply never appeared when the agent started at login).
+    ...(IS_MAC ? { type: 'panel' } : {}),
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  companionWin.setContentProtection(persona().hideFromShare);
+  companionWin.setAlwaysOnTop(true, 'floating');
+  companionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+  companionWin.setIgnoreMouseEvents(true, { forward: true }); // clicks pass through until the pointer is over the orb or its bubble
+  companionWin.loadFile(path.join(RENDERER, 'orbit-companion.html'));
+  companionWin.once('ready-to-show', () => companionWin.showInactive());
+  companionWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  companionWin.on('closed', () => { companionWin = null; });
+}
+
+/** A wellbeing reminder: a speech bubble from the orb (or a system notification if the orb is hidden or the employee prefers it). */
+function deliverCare(n) {
+  if (settings.care.delivery === 'orb' && companionVisible()) companionWin.webContents.send('agent:orbit-care', n);
+  else notifyEmployee(n.title, n.body, 'orbit');
+  broadcast('agent:orbit-care-state');
+}
+
+/** Hiding for an hour (or a custom time) comes back by itself; hiding "until I turn it on" needs one of the ways back below. */
+function hideFor(minutes) {
+  const m = Number(minutes);
+  const result = setPersona({ show: false });   // (this clears any older timer)
+  settings.orbitHiddenUntil = m > 0 ? Date.now() + Math.min(m, 24 * 60) * 60 * 1000 : 0;
+  saveSettings();
+  return result;
+}
+
+/** Bring the companion back (and cancel any timed hide). Used by the ways back: shortcut, menu, popover, dashboard, relaunching the app. */
+function showCompanionAgain() {
+  settings.orbitHiddenUntil = 0;
+  if (presenting) setPresenting(false);
+  return setPersona({ show: true });
+}
+
+/** Someone deliberately opened the app again (relaunch or Dock click): that is a clear sign they want to see it. */
+function reviveCompanion() {
+  if (!persona().show && sync?.enrolled) showCompanionAgain();
+}
+
+const toggleCompanion = () => (persona().show ? hideFor(0) : showCompanionAgain());
+
+function setPersona(patch) {
+  const wasShown = persona().show;
+  if (patch && 'show' in patch) settings.orbitHiddenUntil = 0; // any deliberate show/hide replaces an older timed hide
+  settings.orbit = OrbitLogic.sanitizePersona(patch, persona());
+  if (wasShown && !settings.orbit.show && Notification.isSupported()) {
+    // Hiding is easy to do and easy to forget how to undo: say where the way back is.
+    new Notification({ title: `${persona().name} is hidden`, body: `To bring it back: press ${OrbitLogic.COMPANION_SHORTCUT.replace('CommandOrControl', IS_MAC ? 'Cmd' : 'Ctrl').replace('Alt', IS_MAC ? 'Option' : 'Alt')}, click the Proglintor icon in the menu bar, or open the dashboard and click "Show Orbit".` }).show();
+  }
+  saveSettings();
+  applyCompanion();
+  broadcast('agent:orbit-persona');
+  updateTray();
+  return settings.orbit;
+}
+
+function companionMenu() {
+  const p = persona();
+  const choose = (patch) => () => setPersona(patch);
+  Menu.buildFromTemplate([
+    { label: `Open ${p.name}`, click: () => { showWindow(); win?.webContents.send('agent:goto', 'orbit'); } },
+    { type: 'separator' },
+    { label: 'Ask me something…', click: () => companionWin?.webContents.send('agent:orbit-quick') },
+    { label: 'Say hello now', click: () => companionWin?.webContents.send('agent:orbit-greet') },
+    { type: 'separator' },
+    presentingItem(),
+    { label: 'Log a glass of water', click: () => { care?.logWater(); broadcast('agent:orbit-care-state'); } },
+    care?.snapshot().focus
+      ? { label: 'Stop focus session', click: () => { care.focus(0); broadcast('agent:orbit-care-state'); } }
+      : { label: 'Start a 25-minute focus session', click: () => { care?.focus(25); broadcast('agent:orbit-care-state'); } },
+    care?.snapshot().pausedUntil
+      ? { label: 'Resume reminders', click: () => { care.resume(); broadcast('agent:orbit-care-state'); } }
+      : { label: 'Pause reminders for 1 hour', click: () => { care?.pauseFor(60); broadcast('agent:orbit-care-state'); } },
+    { type: 'separator' },
+    { label: 'Position', submenu: OrbitLogic.DOCKS.map((d) => ({ label: d.name, type: 'radio', checked: p.dock === d.id, click: choose({ dock: d.id }) })) },
+    { label: 'Size', submenu: OrbitLogic.SIZES.map((z) => ({ label: z.name, type: 'radio', checked: p.size === z.id, click: choose({ size: z.id }) })) },
+    { type: 'separator' },
+    { label: 'Hide for 1 hour', click: () => hideFor(60) },
+    { label: 'Hide until I turn it back on', click: () => hideFor(0) },
+  ]).popup({ window: companionWin || undefined });
+}
+
+let dragStart = null;
+
+// ---- Orbit greeting ---------------------------------------------------------------------------
+
+const persona = () => OrbitLogic.sanitizePersona(settings.orbit);
+
+/** Once per local day, when the laptop is opened: a small card greets the employee. It never takes focus and never speaks unless asked to. */
+function maybeGreet() {
+  if (!sync?.enrolled || sync.status().removed || greetWin) return false;
+  const today = OrbitLogic.dayKey();
+  if (!OrbitLogic.shouldGreet({ enabled: persona().greet, enrolled: true, lastDay: settings.orbitLastGreetDay || '', today })) return false;
+  settings.orbitLastGreetDay = today;
+  saveSettings();
+  applyCompanion();
+  if (companionVisible()) companionWin.webContents.send('agent:orbit-greet');
+  else showGreeting();
+  return true;
+}
+
+/**
+ * Weekend check-in: when the laptop is opened on a weekend day, the orb asks (calmly) what brought them in, and offers any high-priority work
+ * assigned to them as an answer. The answer goes to the admin exactly like the weekend prompt always has, and counts as "answered".
+ * Returns true if it asked.
+ */
+const fullscreenApp = makeFullscreenProbe(() => screen.getPrimaryDisplay().bounds);
+
+// ---- keeping the companion out of screen shares ----------------------------------------------------------
+// Layers: (1) the windows are excluded from screen capture where the OS honours it (best effort; newer macOS capture APIs ignore it),
+// (2) the companion hides itself while a call or presentation app is in front, or while Zoom's share helper is running,
+// (3) Presenting mode hides it completely on demand (menu, tray, or the keyboard shortcut) and holds every reminder until it is switched off.
+let presenting = false;
+let presentingTimer = null;
+let zoomSharing = false;
+
+const frontApp = () => { const st = tracker?.status() || {}; return `${st.current?.id || ''} ${st.current?.name || ''}`; };
+const mustHideCompanion = () => CareLogic.shouldHideCompanion({
+  presenting, sharing: zoomSharing, hideInCalls: persona().hideInCalls, pauseInMeetings: settings.care.pauseInMeetings, current: frontApp(), quietApps: settings.care.quietApps,
+});
+
+let orbitLog = null;
+let lastHideReason = '';
+const hideReason = () => (presenting ? 'presenting mode' : zoomSharing ? 'zoom is sharing' : mustHideCompanion() ? `call or presentation app in front (${frontApp().trim()})` : '');
+
+function refreshPrivacy() {
+  if (settings.orbitHiddenUntil && Date.now() >= settings.orbitHiddenUntil) showCompanionAgain(); // the timed hide is over
+  const hide = mustHideCompanion();
+  const reason = hide ? hideReason() : '';
+  if (reason !== lastHideReason) { orbitLog?.(hide ? 'companion.hidden' : 'companion.shown', { reason }); lastHideReason = reason; }
+  for (const w of [companionWin, greetWin]) {
+    if (!w || w.isDestroyed()) continue;
+    w.setContentProtection(persona().hideFromShare);
+    if (hide && w.isVisible()) w.hide();
+    else if (!hide && w === companionWin && !w.isVisible() && persona().show) w.showInactive();
+  }
+}
+
+function setPresenting(on) {
+  presenting = on === true;
+  clearTimeout(presentingTimer);
+  if (presenting) presentingTimer = setTimeout(() => setPresenting(false), 3 * 60 * 60 * 1000); // never stay hidden forever by accident
+  refreshPrivacy();
+  updateTray();
+  broadcast('agent:orbit-care-state');
+  return presenting;
+}
+
+const presentingItem = () => ({ label: presenting ? 'Stop presenting mode (show me again)' : 'Presenting mode: hide me for a call or share', accelerator: OrbitLogic.PRESENTING_SHORTCUT, click: () => setPresenting(!presenting) });
+
+function startPrivacyWatch() {
+  orbitLog = makeLog(app.getPath('userData'), 'orbit.log');
+  orbitLog('agent.start', { args: process.argv.slice(2).join(' '), show: persona().show });
+  setInterval(refreshPrivacy, 2000);
+  // Zoom starts a helper called CptHost for as long as someone is sharing their screen: a real "sharing now" signal.
+  if (process.platform === 'darwin') setInterval(() => execFile('pgrep', ['-x', 'CptHost'], (err) => { zoomSharing = !err; }), 5000);
+  try { globalShortcut.register(OrbitLogic.PRESENTING_SHORTCUT, () => setPresenting(!presenting)); } catch { /* another app owns the shortcut: the menu still works */ }
+  try { globalShortcut.register(OrbitLogic.COMPANION_SHORTCUT, toggleCompanion); } catch { /* the other ways back still work */ }
+  app.on('will-quit', () => globalShortcut.unregisterAll());
+}
+
+/** Greetings and check-ins wait until nothing is using the whole screen (retrying every two minutes), instead of being lost. */
+async function whenFree(fn, tries = 15) {
+  for (let i = 0; i < tries; i++) {
+    if (!mustHideCompanion() && !(await fullscreenApp().catch(() => ''))) return fn();
+    await new Promise((r) => setTimeout(r, 2 * 60 * 1000));
+  }
+  return false;
+}
+
+let pendingCheckIn = null;
+async function weekendCheckIn(demo = false) {
+  if (!sync?.enrolled || sync.status().removed) return false;
+  const policy = sync.policy;
+  const now = Date.now();
+  const day = dayKey(now);
+  if (!demo) {
+    if (!policy.weekendCheck || !isWeekend(now, policy.weekendDays)) return false;
+    if (sync.promptState(day).answered) return false;
+    if (settings.orbitWeekendAskedAt && now - settings.orbitWeekendAskedAt < 90 * 60 * 1000) return false; // never nag: at most once in 90 minutes
+  }
+  applyCompanion();
+  if (!companionVisible()) return false;
+  const r = await orbit.tasks();
+  const urgent = OrbitLogic.pickUrgentTasks(r.ok ? r.data : null, new Date(now));
+  const ask = OrbitLogic.weekendCheckIn({ name: sync.status().employeeName || '', urgent, reasons: policy.reasons, now: new Date(now) });
+  pendingCheckIn = { day, choices: ask.choices, urgent: urgent.length, demo };
+  if (!demo) {
+    settings.orbitWeekendAskedAt = now;
+    settings.orbitLastGreetDay = OrbitLogic.dayKey(new Date(now)); // this replaces today's greeting
+    saveSettings();
+  }
+  companionWin.showInactive();
+  companionWin.moveTop();
+  companionWin.webContents.send('agent:orbit-checkin', { text: ask.text, choices: ask.choices.map((c) => ({ id: c.id, label: c.label })), hasUrgent: urgent.length > 0 });
+  return true;
+}
+
+/** Back at the laptop after a while (lid closed, screen locked): the orb comes forward and says hello with the first thing to do. */
+let awaySince = 0;
+const markAway = () => { if (!awaySince) awaySince = Date.now(); };
+
+async function welcomeBack(demo = false) {
+  const since = awaySince;
+  awaySince = 0;
+  const wb = persona().welcomeBack;
+  if (!demo && (!since || !wb || (Date.now() - since) / 60000 < wb)) return;
+  if (!sync?.enrolled || sync.status().removed || !persona().show) return;
+  applyCompanion();
+  if (!companionVisible()) return;
+  const r = await orbit.tasks();
+  const text = OrbitLogic.welcomeBackText({ name: sync.status().employeeName || '', tasks: r.ok ? r.data : null, hour: new Date().getHours() });
+  companionWin.showInactive();
+  companionWin.moveTop();
+  companionWin.webContents.send('agent:orbit-welcome', { text });
+}
+
+function showGreeting() {
+  if (greetWin && !greetWin.isDestroyed()) { greetWin.show(); return; }
+  const { workArea } = screen.getPrimaryDisplay();
+  const w = 420;
+  const h = 400;
+  greetWin = new BrowserWindow({
+    width: w, height: h, x: Math.round(workArea.x + workArea.width - w - 24), y: Math.round(workArea.y + 24),
+    show: false, frame: false, transparent: true, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    skipTaskbar: true, hasShadow: false, alwaysOnTop: true, title: persona().name,
+    ...(IS_MAC ? { type: 'panel' } : {}), // same reason as the companion: it must appear while another app is in front
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  greetWin.setContentProtection(persona().hideFromShare);
+  greetWin.setAlwaysOnTop(true, 'floating');
+  greetWin.loadFile(path.join(RENDERER, 'orbit-greet.html'));
+  greetWin.once('ready-to-show', () => greetWin.showInactive());
+  greetWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  greetWin.on('closed', () => { greetWin = null; });
+}
+
+/** Saves an approved certificate as a PDF the employee can keep or print. The page is rendered with scripts off. */
+async function saveCertificate(id) {
+  const r = await orbit.certificate(id);
+  if (!r.ok) return r;
+  const target = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : undefined, {
+    title: 'Save certificate', defaultPath: path.join(app.getPath('documents'), `${String(r.data.certificateId || 'certificate').replace(/[^A-Za-z0-9_-]/g, '')}.pdf`),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (target.canceled || !target.filePath) return { ok: true, data: { saved: false } };
+  const hidden = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  try {
+    await hidden.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(r.data.html)}`);
+    const pdf = await hidden.webContents.printToPDF({ landscape: true, printBackground: true, pageSize: 'A4', margins: { marginType: 'none' } });
+    fs.writeFileSync(target.filePath, pdf);
+    return { ok: true, data: { saved: true, path: target.filePath } };
+  } catch {
+    return { ok: false, code: 'save_failed', error: 'I could not save the certificate. Please try another folder.' };
+  } finally {
+    hidden.destroy();
+  }
+}
+
 function registerIpc() {
+  ipcMain.handle('orbit:checkin:answer', (e, id) => {
+    if (!companionWin || e.sender !== companionWin.webContents || !pendingCheckIn) return { ok: false };
+    const c = pendingCheckIn.choices.find((x) => x.id === id);
+    if (!c) return { ok: false };
+    const { day } = pendingCheckIn;
+    const pendingCheckIn_demo = pendingCheckIn.demo === true;
+    pendingCheckIn = null;
+    if (c.reason && !pendingCheckIn_demo) {
+      sync.queueAlert({ day, appId: 'orbit', appName: 'Orbit check-in', reason: c.reason, details: c.details, approver: '', duration: '', dismissed: false });
+      sync.markPrompt(day, { answered: true });
+    }
+    return { ok: true, reply: OrbitLogic.replyFor(c), recorded: Boolean(c.reason) && !pendingCheckIn_demo };
+  });
+  ipcMain.handle('orbit:hide', (_e, minutes) => { hideFor(minutes); return true; });
+  ipcMain.handle('orbit:show', () => { showCompanionAgain(); return true; });
+  ipcMain.handle('orbit:presenting', (_e, on) => (typeof on === 'boolean' ? setPresenting(on) : presenting));
+  ipcMain.handle('orbit:care:get', () => ({ config: settings.care, snapshot: care.snapshot(), presenting }));
+  ipcMain.handle('orbit:care:set', (_e, patch) => {
+    settings.care = CareLogic.sanitizeCare(patch, settings.care);
+    saveSettings();
+    broadcast('agent:orbit-care-state');
+    return { config: settings.care, snapshot: care.snapshot() };
+  });
+  ipcMain.handle('orbit:care:act', (_e, kind, action) => { const r = care.act(kind, action); broadcast('agent:orbit-care-state'); return r; });
+  ipcMain.handle('orbit:care:water', () => { const r = care.logWater(); broadcast('agent:orbit-care-state'); return r; });
+  ipcMain.handle('orbit:care:pause', (_e, minutes) => { const r = minutes > 0 ? care.pauseFor(minutes) : care.resume(); broadcast('agent:orbit-care-state'); return r; });
+  ipcMain.handle('orbit:care:focus', (_e, minutes) => { const r = care.focus(minutes); broadcast('agent:orbit-care-state'); return r; });
+  ipcMain.handle('orbit:companion:layout', () => OrbitLogic.placement(persona(), screen.getPrimaryDisplay().workArea));
+  ipcMain.handle('orbit:companion:hit', (e, over) => { if (companionWin && !companionWin.isDestroyed() && e.sender === companionWin.webContents) companionWin.setIgnoreMouseEvents(!over, { forward: true }); return true; });
+  ipcMain.handle('orbit:companion:open', (_e, page) => { showWindow(); win?.webContents.send('agent:goto', page === 'install' ? 'install' : 'orbit'); return true; });
+  ipcMain.handle('orbit:companion:focus', (e, on) => {
+    if (!companionWin || companionWin.isDestroyed() || e.sender !== companionWin.webContents) return false;
+    companionWin.setFocusable(on === true); // typing needs focus; otherwise the companion never takes it
+    if (on === true) companionWin.focus();
+    return true;
+  });
+  /** "Show me": plays one of the companion's moments right now, so people can see (and choose) the animals without waiting. Records nothing. */
+  ipcMain.handle('orbit:demo', async (_e, kind) => {
+    if (!persona().show) return { ok: false, error: 'The companion is hidden. Turn on "Keep me on screen" first.' };
+    if (!sync?.enrolled) return { ok: false, error: 'Connect this laptop first (My Device).' };
+    applyCompanion();
+    await new Promise((r) => setTimeout(r, 400));
+    if (!companionVisible()) return { ok: false, error: 'The companion is not on screen yet. Try again in a moment.' };
+    companionWin.showInactive();
+    const name = (sync.status().employeeName || '').split(/\s+/)[0];
+    if (kind === 'greet') companionWin.webContents.send('agent:orbit-greet');
+    else if (kind === 'welcome') await welcomeBack(true);
+    else if (kind === 'checkin') await weekendCheckIn(true);
+    else if (kind === 'quick') companionWin.webContents.send('agent:orbit-quick');
+    else if (CareLogic.words(kind).body !== '') companionWin.webContents.send('agent:orbit-care', { id: `demo-${kind}`, kind, ...CareLogic.words(kind, { counts: {}, activeMs: 9 * 3600000, name }), demo: true });
+    else return { ok: false, error: 'Unknown moment.' };
+    return { ok: true };
+  });
+  ipcMain.handle('orbit:companion:menu', () => { companionMenu(); return true; });
+  ipcMain.handle('orbit:companion:drag', (e, phase, dx, dy) => {
+    if (!companionWin || companionWin.isDestroyed() || e.sender !== companionWin.webContents) return false;
+    if (phase === 'start') dragStart = companionWin.getBounds();
+    else if (phase === 'move' && dragStart && Number.isFinite(dx) && Number.isFinite(dy)) companionWin.setPosition(Math.round(dragStart.x + dx), Math.round(dragStart.y + dy));
+    else if (phase === 'end' && dragStart) {
+      const b = companionWin.getBounds();
+      dragStart = null;
+      setPersona({ dock: 'free', x: b.x, y: b.y });
+    }
+    return true;
+  });
+  ipcMain.handle('orbit:briefing', () => orbit.briefing());
+  ipcMain.handle('orbit:chat', (_e, messages, agentName) => orbit.chat(messages, agentName));
+  ipcMain.handle('orbit:tasks', () => orbit.tasks());
+  ipcMain.handle('orbit:task', (_e, id, patch) => orbit.updateTask(id, patch));
+  ipcMain.handle('orbit:achievements', () => orbit.achievements());
+  ipcMain.handle('orbit:nominate', (_e, body) => orbit.nominate(body));
+  ipcMain.handle('orbit:certificate', (_e, id) => orbit.certificate(id));
+  ipcMain.handle('orbit:certificate:save', (_e, id) => (ORBIT_UUID.test(String(id)) ? saveCertificate(id) : { ok: false, code: 'bad_input', error: 'I could not find that certificate.' }));
+  ipcMain.handle('orbit:persona:get', () => persona());
+  ipcMain.handle('orbit:persona:set', (_e, patch) => setPersona(patch));
+  ipcMain.handle('orbit:identity', () => ({ name: sync.status().employeeName || '', enrolled: Boolean(sync.enrolled) }));
+  ipcMain.handle('orbit:poke', () => { orbit.poke(); return true; });
+  ipcMain.handle('orbit:greet:act', (e, what) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (what === 'open') { showWindow(); win?.webContents.send('agent:goto', 'orbit'); }
+    if (what === 'off') setPersona({ greet: false });
+    if (w && !w.isDestroyed()) w.close();
+    return true;
+  });
+
 
   // Organization (Proglint server)
   ipcMain.handle('org:status', () => ({ ...sync.status(), device: device() }));
   ipcMain.handle('org:enroll', async (_e, code) => {
-    try { return { ok: true, status: await sync.enroll(code) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { const status = await sync.enroll(code); applyCompanion(); return { ok: true, status }; } catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('org:sync', async () => {
     try { await sync.syncNow(); return { ok: true }; } catch (err) { return { ok: false, error: err.message }; }

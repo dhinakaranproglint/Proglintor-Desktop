@@ -89,6 +89,60 @@ prompt-injection / off-topic input, and a laptop re-assigned to someone else (th
 macOS **dmg** and **pkg** (pkg asks the employee for administrator permission), Windows (msi/exe, Authenticode check) and Linux (AppImage) are implemented but not yet run against real signed vendor installers or on those platforms. Try each type with a real, signed installer before rolling out.
 For local development only, `PROGLINTOR_ALLOW_LOOPBACK_HTTP=1` lets the agent download from `http://127.0.0.1`.
 
+## Orbit (personal work companion)
+Open **Orbit** in the agent. When an employee opens their laptop, a small card greets them by the time of day ("Good morning, Asha!") with a
+short summary of their day, once a day, without taking focus. The Orbit page shows their **tasks** (they can update status and progress),
+this week's **workload**, **achievements** and **appreciation**, plus a chat that knows all of it. Good work (tasks delivered early, weekend
+effort, focus streaks, or extra effort they describe) can be sent to the admin, who approves a reward and credits; the employee then gets a
+**certificate** (saved as PDF). Installs from chat are routed to the safe Install flow; the companion never installs, opens or changes anything.
+- **Always nearby:** a small floating orb stays on screen (like an assistant that is always there). Click it to open Orbit, drag it anywhere, or
+  right-click to pick a corner (top/bottom, left/right), size, or hide it. It says hello once a day in a speech bubble and speaks up for new tasks
+  and decisions on appreciation. It never takes keyboard focus, and clicks pass through everywhere except the orb itself.
+- **Real data, not demo data:** questions like "how many hours today on VS Code?" are answered from the app time this laptop actually reported
+  (the agent sends its latest numbers just before answering, so it is exact). Only **tasks and meetings** can be demo data; commits and pull
+  requests are never simulated (they show as "not connected" until Azure DevOps is set up).
+- **A companion that lives on your screen:** pick who it is (the orb, or an animal: Splash the otter, Rudy the red panda, Hoot the owl, Slo the
+  sloth). It is always there, ready to chat: **click it and just ask** (a small chat box opens: "How can I help you today?"), drag it anywhere,
+  right-click for options. When you open your laptop it greets you by name, mentions today's tasks, and asks how it can help. On weekends it first
+  asks gently what brought you in.
+- **Animal friends act out the moments:** an otter sips water, a red panda stretches (or waves hello, or munches lunch), an owl rests his eyes, a
+  sloth breathes slowly. In Customise you can choose **who plays each moment** (or nobody), see **when each one happens**, and press **Show me** to
+  play any of them right now. Turn them all off to keep just the companion.
+- **Good manners:** the companion never interrupts a full-screen presentation, video or game (macOS hides it there anyway, so Orbit holds reminders and
+  greetings back and delivers them when you are free), and it stays quiet while one of your listed apps (Teams, Zoom, Keynote, PowerPoint... editable in
+  "Reminders…") is in front. News such as a new task arrives as a normal system notification then, which respects Do Not Disturb. Turn any of this off
+  in "Reminders…".
+- **If the companion does not show:** check `~/Library/Application Support/Proglintor/orbit.log` (it records every hide/show decision and why), make sure
+  "Keep me on screen" is on (the dashboard sidebar shows "Orbit is hidden. Show" when it is off), and that the agent is running
+  (`npm run autostart:status`, or `launchctl kickstart -k gui/$(id -u)/com.proglint.proglintor.agent.dev` to start it now).
+- **Hiding, and getting it back:** right-click the companion for "Hide for 1 hour" (comes back by itself) or "Hide until I turn it back on". It is
+  easy to bring back from anywhere: press **Cmd+Option+Shift+A**, click the menu-bar icon, click the "Orbit is hidden. Show" button that appears in the
+  dashboard sidebar, tick Customise > "Keep me on screen", or simply launch the app again (that counts as "I want to see it").
+- **Screen sharing and presenting:** the companion is kept out of shares in layers. (1) Its windows are excluded from screen capture where the
+  operating system honours it (best effort: newer macOS capture APIs, used by Zoom, Teams and Meet, may ignore it). (2) It hides itself while a call
+  or presentation app is in front, or while Zoom's share helper is running. (3) **Presenting mode** hides it completely and holds every reminder and
+  notification until you turn it off: use the orb's right-click menu, the menu-bar item, the Orbit page, or the shortcut Cmd+Option+Shift+O
+  (Ctrl+Alt+Shift+O elsewhere). It switches itself off after 3 hours so it can never stay hidden by accident. All three are optional in Customise.
+- **Always running, and there when you open your laptop:** the installed agent starts at login and can't be quit from its own menus
+  (`npm run dist:agent:mac` builds the installer). For development on macOS, `npm run autostart:on` makes the dev agent start hidden at every login
+  (`autostart:off` turns it off, `autostart:status` shows the state); after that it greets you whenever you open the laptop: the first time each
+  day, and again after being away (default 20 minutes). Without either, `npm run agent` only runs while that terminal is open.
+- **Weekend check-in:** if the laptop is opened on a weekend day (per the admin's weekend policy), the orb asks calmly what brought them in
+  ("It's Sunday, Asha. I noticed 'Fix the login bug' is urgent and due tomorrow. Is that what brought you in? No pressure."). The answers are their own
+  high-priority tasks, the company's weekend reasons, or "just a quick look". An answer goes to the admin as a weekend alert (source "Orbit check-in"),
+  counts as answered so they aren't asked again, and never asks more than once in 90 minutes. "Just a quick look" records nothing.
+- **Welcome back:** after being away (default 20 min) the orb pops forward with the first thing to do.
+- **Take-care reminders:** gentle nudges, only while the person is actively working, all customisable (Orbit page, "Take care", "Reminders…"):
+  drink water (every 5 to 240 min), the 20-20-20 eye rest with a 20-second guided countdown, stretch and posture, a real break with a one-minute
+  "breathe with me" exercise, lunch, an end-of-day wrap-up (what you did, tomorrow's first task), and a long-day guard. Meetings, breaks away from
+  the desk and a closed lid reset or pause the clock, so it never nags during a call. Also: quiet hours, weekdays-only, 25-minute **focus sessions**
+  (no interruptions), "pause for an hour", and "I drank water". Delivered as an orb speech bubble or a system notification. Counts stay on the laptop.
+- **Make it theirs:** name, colour, animation style (Aurora, Pulse, Orbit, Voice), sound theme and volume (Chime, Soft, Sparkle, Silent),
+  spoken greeting, greet-at-startup and a still mode. Sounds are synthesised on the device (no audio files).
+- **Admin app:** *Tasks* (assign to one or many people, see whether it fits their week), *Recognition* (approve, reward, credits, certificate,
+  or recognise someone directly) and *Team insights* (workload table and an analyst you can ask questions).
+- Orbit needs the backend (`/api/agent/orbit/*`) and a Gemini key for the smart chat; without a key it answers common questions by rules.
+
 ## Removing a laptop
 Deleting an asset in the admin (or issuing a new enrollment code for it) deprovisions that laptop:
 - Within about 30 seconds the agent shows **"This laptop was removed from Proglintor"**, with who it was assigned to and when, plus a native notification. Opening the app checks immediately.
