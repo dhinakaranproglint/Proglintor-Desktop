@@ -188,6 +188,8 @@ function openAssetDialog(existing = null) {
           ${field('f-name', 'Employee name', a.employeeName, { req: true, ph: 'Priya Sharma' })}
           ${field('f-email', 'Employee email address', a.employeeEmail, { req: true, ph: 'priya.sharma@proglint.com', type: 'email' })}
           ${field('f-dept', 'Department', a.department, { ph: 'Engineering' })}
+          ${field('f-mgr', 'Reports to (name)', a.managerName, { ph: 'Raj Rao', hint: 'Orbit messages this person if the employee says they have no task.' })}
+          ${field('f-mgr-email', 'Reports to (email)', a.managerEmail, { ph: 'raj.rao@proglint.com', type: 'email' })}
           ${field('f-loc', 'Office / address', a.location, { ph: 'Chennai office, 3rd floor' })}
           ${field('f-notes', 'Notes', a.notes, { full: true, textarea: true, ph: 'Serial number, accessories, etc.' })}
         </div>
@@ -201,7 +203,7 @@ function openAssetDialog(existing = null) {
   $('#f-save').addEventListener('click', async () => {
     const data = {
       assetId: $('#f-id').value.trim(), deviceType: $('#f-type').value, employeeName: $('#f-name').value.trim(), employeeEmail: $('#f-email').value.trim(),
-      department: $('#f-dept').value.trim(), location: $('#f-loc').value.trim(), notes: $('#f-notes').value.trim(),
+      department: $('#f-dept').value.trim(), managerName: $('#f-mgr').value.trim(), managerEmail: $('#f-mgr-email').value.trim(), location: $('#f-loc').value.trim(), notes: $('#f-notes').value.trim(),
     };
     const r = existing ? await admin.updateAsset(existing.assetId, data) : await admin.createAsset(data);
     if (!r.ok) { $('#f-err').textContent = r.error; return; }
@@ -493,7 +495,7 @@ function offlineBanner(err) {
 
 // ---- navigation & live updates ------------------------------------------------------------------
 
-const PAGES = { dashboard: renderDashboard, assets: renderAssets, approvals: renderApprovals, software: renderSoftware, tasks: renderTasks, recognition: renderRecognition, team: renderTeam, alerts: renderAlerts, policies: renderPolicies, settings: renderSettings };
+const PAGES = { dashboard: renderDashboard, assets: renderAssets, approvals: renderApprovals, software: renderSoftware, tasks: renderTasks, timesheets: renderTimesheets, awards: renderAwards, recognition: renderRecognition, team: renderTeam, alerts: renderAlerts, policies: renderPolicies, settings: renderSettings };
 
 function go(page) {
   closeDrawer();

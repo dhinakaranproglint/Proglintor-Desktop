@@ -7,6 +7,7 @@
   <title>Proglintor</title>
   <link rel="stylesheet" href="../../shared/renderer/styles.css">
   <link rel="stylesheet" href="../../shared/renderer/orbit.css">
+  <link rel="stylesheet" href="../../shared/renderer/timesheet.css">
 </head>
 <body>
   <div class="shell">
@@ -19,8 +20,9 @@
       <nav id="nav">
         <button data-page="overview" class="active"><span data-icon="overview"></span>Overview</button>
         <button data-page="orbit"><span data-icon="orbit"></span>Orbit</button>
-        <button data-page="install"><span data-icon="chat"></span>Install software<span class="badge" id="install-badge" hidden></span></button>
+        <button data-page="timesheet"><span data-icon="calendar"></span>Timesheet</button>
         <button data-page="apps"><span data-icon="apps"></span>Applications</button>
+        <button data-page="install"><span data-icon="download"></span>Install software<span class="badge" id="install-badge" hidden></span></button>
         <button data-page="device"><span data-icon="monitor"></span>My Device</button>
         <button data-page="settings"><span data-icon="settings"></span>Settings</button>
       </nav>
@@ -45,7 +47,10 @@
   <script src="../../shared/renderer/orbit-orb.js"></script>
   <script src="../../shared/renderer/orbit-sound.js"></script>
   <script src="../../shared/renderer/orbit-buddies.js"></script>
+  <script src="../../shared/renderer/timesheet-logic.js"></script>
+  <script src="../../shared/renderer/timesheet-view.js"></script>
   <script src="orbit.js"></script>
+  <script src="timesheet.js"></script>
   <script src="install.js"></script>
   <script src="app.js"></script>
 </body>

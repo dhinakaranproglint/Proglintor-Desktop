@@ -289,6 +289,26 @@ function registerIpc() {
   form('orbit:rec:award', async (_e, body) => { const r = await backend.post(orbitPath('recognitions'), body); poll(); return r; });
   form('orbit:rec:cert', (_e, id) => { if (!okId(id)) throw new Error('Unknown certificate'); return backend.get(orbitPath(`recognitions/${enc(id)}/certificate`)); });
   handle('orbit:team', () => backend.get(orbitPath('team')));
+  handle('orbit:messages', () => backend.get(orbitPath('messages?open=1')));
+  form('orbit:message:resolve', async (_e, id) => { if (!okId(id)) throw new Error('Unknown message'); return backend.post(orbitPath(`messages/${enc(id)}/resolve`), {}); });
+
+  // Timesheets and Employee of the Month
+  const okAsset = (v) => typeof v === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(v);
+  const okMonth = (v) => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+  handle('ts:get', (_e, assetId, month) => { if (!okAsset(assetId) || !okMonth(month)) throw new Error('Pick an employee and a valid month'); return backend.get(orbitPath(`timesheets/${enc(assetId)}?month=${month}`)); });
+  handle('ts:summary', (_e, assetId, period, start) => {
+    if (!okAsset(assetId) || !['week', 'month'].includes(period) || !/^\d{4}-\d{2}-\d{2}$/.test(String(start))) throw new Error('Pick an employee, a period and a date');
+    return backend.get(orbitPath(`timesheets/${enc(assetId)}/summary?period=${period}&start=${start}`));
+  });
+  handle('awards:candidates', (_e, month) => { if (!okMonth(month)) throw new Error('Pick a valid month'); return backend.get(orbitPath(`awards/candidates?month=${month}`)); });
+  handle('awards:list', () => backend.get(orbitPath('awards')));
+  form('awards:citation', (_e, month, assetId) => { if (!okMonth(month) || !okAsset(assetId)) throw new Error('Pick a month and an employee'); return backend.post(orbitPath('awards/citation'), { month, assetId }); });
+  form('awards:make', async (_e, body) => {
+    if (!okMonth(body?.month) || !okAsset(body?.assetId)) throw new Error('Pick a month and an employee');
+    const r = await backend.post(orbitPath('awards'), { month: body.month, assetId: body.assetId, reward: String(body.reward || '').slice(0, 200), credits: Number(body.credits) || 0, citation: String(body.citation || '').slice(0, 600), replace: body.replace === true });
+    poll();
+    return r;
+  });
   form('orbit:chat', (_e, messages) => backend.post(orbitPath('chat'), { messages }));
   handle('assets:detail', async (_e, id) => ({ ...(await backend.get(`/api/admin/assets/${enc(id)}`)), server: serverInfo() }));
   form('assets:create', async (_e, data) => { const a = await backend.post('/api/admin/assets', data); send('admin:update'); return a; });

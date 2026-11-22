@@ -5,6 +5,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>Proglintor Admin</title>
   <link rel="stylesheet" href="../../shared/renderer/styles.css">
+  <link rel="stylesheet" href="../../shared/renderer/timesheet.css">
   <style>
     .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
     .kpi .big { font-size: 34px; margin: 8px 0 2px; }
@@ -59,6 +60,7 @@
     .side-brand .tag-admin { background: rgba(247, 161, 95, .16); color: #F7A15F; }
     .admin-side .nav-label { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.38); padding: 0 12px 8px; }
     .admin-side nav { gap: 3px; }
+    .admin-side nav .nav-group { padding-top: 14px; padding-bottom: 4px; }
     .admin-side nav button { position: relative; padding: 10px 12px; border-radius: 10px; color: rgba(255,255,255,.72); font-weight: 550; }
     .admin-side nav button:hover { background: rgba(255,255,255,.06); color: #fff; }
     .admin-side nav button.active, .platform-darwin .admin-side nav button.active { background: rgba(232, 96, 63, .16); color: #fff; box-shadow: none; }
@@ -202,16 +204,21 @@
         <img src="../../../assets/brand/proglint-logo-white.png" alt="Proglint">
         <span class="tag-admin">Admin</span>
       </div>
-      <div class="nav-label">Menu</div>
+      <div class="nav-label">Monitor</div>
       <nav id="nav">
         <button data-page="dashboard" class="active"><span data-icon="dashboard"></span>Dashboard</button>
-        <button data-page="assets"><span data-icon="monitor"></span>Assets</button>
-        <button data-page="approvals"><span data-icon="clipboard"></span>Approvals<span class="badge" id="approval-badge" hidden></span></button>
-        <button data-page="software"><span data-icon="layers"></span>Software catalogue</button>
-        <button data-page="tasks"><span data-icon="clipboard"></span>Tasks</button>
-        <button data-page="recognition"><span data-icon="bell"></span>Recognition<span class="badge" id="rec-badge" hidden></span></button>
         <button data-page="team"><span data-icon="dashboard"></span>Team insights</button>
+        <button data-page="assets"><span data-icon="monitor"></span>Assets</button>
+        <div class="nav-label nav-group">Act</div>
+        <button data-page="approvals"><span data-icon="clipboard"></span>Approvals<span class="badge" id="approval-badge" hidden></span></button>
         <button data-page="alerts"><span data-icon="bell"></span>Weekend alerts<span class="badge" id="alert-badge" hidden></span></button>
+        <button data-page="tasks"><span data-icon="clipboard"></span>Tasks</button>
+        <div class="nav-label nav-group">People</div>
+        <button data-page="timesheets"><span data-icon="calendar"></span>Timesheets</button>
+        <button data-page="recognition"><span data-icon="bell"></span>Recognition<span class="badge" id="rec-badge" hidden></span></button>
+        <button data-page="awards"><span data-icon="award"></span>Employee of the Month</button>
+        <div class="nav-label nav-group">Manage</div>
+        <button data-page="software"><span data-icon="layers"></span>Software catalogue</button>
         <button data-page="policies"><span data-icon="shield"></span>Policies</button>
         <button data-page="settings"><span data-icon="settings"></span>Settings</button>
       </nav>
@@ -233,7 +240,10 @@
   <script src="../../shared/renderer/install-view.js"></script>
   <script src="auth.js"></script>
   <script src="software.js"></script>
+  <script src="../../shared/renderer/timesheet-logic.js"></script>
+  <script src="../../shared/renderer/timesheet-view.js"></script>
   <script src="orbit.js"></script>
+  <script src="timesheets.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

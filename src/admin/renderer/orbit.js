@@ -34,8 +34,9 @@ const ORBIT_CSS = `<style>
 
 async function renderTasks() {
   const filter = state.taskFilter || 'open';
-  const data = await admin.orbitTasks();
+  const [data, inbox] = await Promise.all([admin.orbitTasks(), admin.orbitMessages().catch(() => ({ items: [] }))]);
   if (state.page !== 'tasks') return;
+  const asks = (inbox && inbox.items) || [];
   const all = data.items || [];
   const rows = all.filter((t) => (filter === 'open' ? t.status !== 'done' : filter === 'done' ? t.status === 'done' : true));
   const today = todayIso();
@@ -43,6 +44,8 @@ async function renderTasks() {
   view.innerHTML = `${ORBIT_CSS}
     ${topbar('Tasks', 'Assign work. Orbit helps each person plan it and tells you if the week looks too full', `<button class="btn primary" id="t-new">${icon('plus', 14)} Assign task</button>`)}
     <div class="content">
+      ${asks.length ? `<section class="card" style="margin-bottom:14px"><b>${asks.length} ${asks.length === 1 ? 'person says' : 'people say'} they have no task</b>
+        ${asks.map((m) => `<div style="display:flex;gap:10px;align-items:center;margin-top:8px">${oavatar(m.employeeName)}<div style="flex:1;min-width:0"><div class="t">${esc(m.employeeName)}</div><div class="s">${esc(rel(m.createdAt))} · sent to ${esc(m.toName || 'the admin')}${m.emailed ? ' by email' : ''}</div></div><button class="btn primary" data-give="${esc(m.assetId)}">Assign task</button><button class="btn ghost" data-close="${esc(m.id)}">Dismiss</button></div>`).join('')}</section>` : ''}
       <div class="chips">${[['open', 'Open'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button class="chip ${filter === k ? 'on' : ''}" data-tf="${k}">${l}<span class="count">${counts[k]}</span></button>`).join('')}</div>
       ${rows.length ? `<section class="table"><div class="o-row3 head"><span>Task</span><span>Assigned to</span><span>Priority</span><span>Due</span><span>Progress</span><span></span></div>
         ${rows.map((t) => `<div class="o-row3"><div><div class="t">${esc(t.title)}</div><div class="s">${t.estimatedHours ? `${esc(t.estimatedHours)}h estimated` : 'No estimate'}${t.description ? ` · ${esc(t.description.slice(0, 80))}` : ''}</div></div>
@@ -55,6 +58,8 @@ async function renderTasks() {
     </div>`;
   $$('[data-tf]').forEach((c) => c.addEventListener('click', () => { state.taskFilter = c.dataset.tf; renderTasks(); }));
   $('#t-new').addEventListener('click', openTaskDialog);
+  $$('[data-give]').forEach((b) => b.addEventListener('click', openTaskDialog));
+  $$('[data-close]').forEach((b) => b.addEventListener('click', async () => { const r = await admin.resolveMessage(b.dataset.close); if (!r.ok) flash(r.error, 'bad'); else renderTasks(); }));
   $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Delete this task? The employee will no longer see it.')) return;
     const r = await admin.deleteTask(b.dataset.del);

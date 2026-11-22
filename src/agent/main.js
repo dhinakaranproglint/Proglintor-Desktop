@@ -14,6 +14,7 @@ const { SoftwareAgent } = require('./software');
 const { watchApps } = require('./appwatch');
 const { OrbitAgent, UUID: ORBIT_UUID } = require('./orbit');
 const OrbitLogic = require('../shared/renderer/orbit-logic');
+const TimesheetLogic = require('../shared/renderer/timesheet-logic');
 const CareLogic = require('../shared/renderer/care-logic');
 const { CareCoach } = require('./care');
 const { makeFullscreenProbe } = require('./screenstate');
@@ -1003,6 +1004,18 @@ function registerIpc() {
   ipcMain.handle('orbit:tasks', () => orbit.tasks());
   ipcMain.handle('orbit:task', (_e, id, patch) => orbit.updateTask(id, patch));
   ipcMain.handle('orbit:achievements', () => orbit.achievements());
+  ipcMain.handle('orbit:timesheet', (_e, month) => orbit.timesheet(month));
+  ipcMain.handle('orbit:timesheet:summary', (_e, period, start) => orbit.timesheetSummary(period, start));
+  ipcMain.handle('orbit:timesheet:csv', async (_e, month) => {
+    const r = await orbit.timesheet(month);
+    if (!r.ok) return r;
+    const who = sync.status().employeeName || '';
+    const target = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : undefined, {
+      title: 'Save timesheet', defaultPath: path.join(app.getPath('documents'), `timesheet-${month}.csv`), filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (target.canceled || !target.filePath) return { ok: true, data: { saved: false } };
+    try { fs.writeFileSync(target.filePath, TimesheetLogic.toCsv(r.data, who)); return { ok: true, data: { saved: true } }; } catch { return { ok: false, code: 'save_failed', error: 'I could not save the file. Please try another folder.' }; }
+  });
   ipcMain.handle('orbit:nominate', (_e, body) => orbit.nominate(body));
   ipcMain.handle('orbit:certificate', (_e, id) => orbit.certificate(id));
   ipcMain.handle('orbit:certificate:save', (_e, id) => (ORBIT_UUID.test(String(id)) ? saveCertificate(id) : { ok: false, code: 'bad_input', error: 'I could not find that certificate.' }));

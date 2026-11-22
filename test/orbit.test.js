@@ -226,3 +226,17 @@ test('the latest tracked time is sent to the server before a question is asked, 
   const failing = new OrbitAgent({ sync, now: () => NOW, flush: async () => { throw new Error('offline'); } });
   assert.equal((await failing.chat([{ role: 'user', content: 'hi' }])).ok, true, 'a failed push does not stop the answer');
 });
+
+test('the timesheet calls validate their input before anything is sent', async () => {
+  const sync = fakeSync({ '/api/agent/orbit/timesheet': { month: '2026-03' } });
+  const o = new OrbitAgent({ sync, now: () => NOW });
+  assert.equal((await o.timesheet('../../x')).ok, false);
+  assert.equal((await o.timesheet('2026-13')).ok, false);
+  assert.equal((await o.timesheetSummary('year')).ok, false);
+  assert.equal((await o.timesheetSummary('week', 'soon')).ok, false);
+  assert.equal(sync.calls.length, 0, 'nothing odd was sent');
+  assert.equal((await o.timesheet('2026-03')).ok, true);
+  assert.match(sync.calls[0].path, /timesheet\?month=2026-03$/);
+  await o.timesheetSummary('week', '2026-03-16');
+  assert.match(sync.calls[1].path, /summary\?period=week&start=2026-03-16$/);
+});

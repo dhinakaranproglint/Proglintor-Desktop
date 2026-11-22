@@ -52,6 +52,7 @@ const UI = (() => {
 
   // Lucide-style line icons (MIT), inlined so the app works offline.
   const ICONS = {
+    award: '<circle cx="12" cy="8" r="6"/><path d="M8.2 13.4L7 22l5-3 5 3-1.2-8.6"/>',
     orbit: '<circle cx="12" cy="12" r="3.2"/><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(-28 12 12)"/><circle cx="19.2" cy="7.2" r="1.1"/>',
     overview: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>',
     apps: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',

@@ -707,6 +707,7 @@ function go(page) {
   else if (page === 'device') loadDevice();
   else if (page === 'install') renderInstall();
   else if (page === 'orbit') OrbitPage.render();
+  else if (page === 'timesheet') TimesheetPage.render();
   else loadSettings();
 }
 $$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.page)));

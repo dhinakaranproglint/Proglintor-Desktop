@@ -101,6 +101,20 @@ class OrbitAgent {
     return r;
   }
 
+  /** The employee's own month: calendar, days, totals (built by the server from real tracked time and task activity). */
+  timesheet(month) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month))) return Promise.resolve({ ok: false, code: 'bad_input', error: 'Pick a valid month.' });
+    return this._call('GET', `/api/agent/orbit/timesheet?month=${month}`);
+  }
+
+  async timesheetSummary(period, start) {
+    if (!['week', 'month'].includes(period)) return { ok: false, code: 'bad_input', error: 'Pick week or month.' };
+    const q = [`period=${period}`];
+    if (start != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(start))) return { ok: false, code: 'bad_input', error: 'That date is not valid.' };
+    if (start) q.push(`start=${start}`);
+    return this._call('GET', `/api/agent/orbit/timesheet/summary?${q.join('&')}`);
+  }
+
   achievements() { return this._call('GET', `/api/agent/orbit/achievements?localTime=${encodeURIComponent(L.localIso(this.now()))}`); }
 
   async nominate({ dedupeKey, title, details } = {}) {
