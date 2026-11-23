@@ -461,8 +461,6 @@ function openCustomiser() {
   const m = modal(`<h2>Make it yours</h2><p class="lead">Name your companion, pick a colour, a motion style and how it sounds. Changes apply instantly.</p>
     <div style="padding:12px 0 4px"><b style="font-size:13.5px">Who lives on your screen</b><div class="muted small" style="margin:2px 0 8px">Your companion stays on screen, ready to chat. Click it to talk.</div>
       <div class="o-avatars">${OrbitLogic.AVATARS.map((a) => `<button class="o-av ${p.avatar === a ? 'on' : ''}" data-avatar="${a}" title="${a === 'orb' ? 'The orb' : esc(OrbitBuddies.ANIMALS[a].name)}">${a === 'orb' ? '<span class="o-orbdot"></span>' : OrbitBuddies.svg(a, { color: p.color, size: 62 })}<b>${a === 'orb' ? 'Orb' : esc(OrbitBuddies.ANIMALS[a].name)}</b></button>`).join('')}</div></div>
-    ${sw2('c-hideshare', 'Keep me out of screen shares and recordings', 'Excluded from captures where your system allows it (newer macOS versions may ignore this: see the next two)', p.hideFromShare)}
-    ${sw2('c-hidecalls', 'Hide me while a call or presentation app is in front', 'Teams, Zoom, Keynote... (the list is in Reminders). Also hides while Zoom is sharing', p.hideInCalls)}
     <div class="o-row"><div class="l"><b>Presenting mode</b><span>Hides me completely and holds every reminder. Shortcut: ${esc(OrbitLogic.PRESENTING_SHORTCUT.replace('CommandOrControl', navigator.platform.includes('Mac') ? '⌘' : 'Ctrl').replace('Alt', navigator.platform.includes('Mac') ? '⌥' : 'Alt').replace('Shift', '⇧').replace(/\+/g, ' '))}</span></div><button class="btn sm" id="c-present">${orb.care && orb.care.presenting ? 'Turn off' : 'Turn on'}</button></div>
     ${sw2('c-buddy', 'Animal friends act out my reminders', 'An otter sips water, a panda stretches, an owl rests his eyes, a sloth breathes. Off = just the companion', p.buddy === 'animals')}
     <div style="padding:10px 0 2px"><b style="font-size:13.5px">When the animals appear, and who plays each part</b><div class="muted small" style="margin:2px 0 6px">Press Show me to see any of them right now.</div>
@@ -502,8 +500,6 @@ function openCustomiser() {
     const r = await agent.orbit.demo(b.dataset.demo);
     m.querySelector('#c-demo-msg').textContent = r.ok ? 'Look at your screen: your companion is showing it.' : r.error;
   }));
-  m.querySelector('#c-hideshare').addEventListener('change', (e) => save({ hideFromShare: e.target.checked }));
-  m.querySelector('#c-hidecalls').addEventListener('change', (e) => save({ hideInCalls: e.target.checked }));
   m.querySelector('#c-present').addEventListener('click', async (e) => { const on = await agent.orbit.presenting(!(orb.care && orb.care.presenting)); e.target.textContent = on ? 'Turn off' : 'Turn on'; loadCare(); });
   m.querySelector('#c-buddy').addEventListener('change', (e) => save({ buddy: e.target.checked ? 'animals' : 'orb' }));
   m.querySelector('#c-wb').addEventListener('change', (e) => save({ welcomeBack: Number(e.target.value) }));

@@ -270,6 +270,15 @@ function registerIpc() {
 
   // Data
   handle('dash:get', async () => ({ ...(await backend.get('/api/admin/dashboard')), server: serverInfo() }));
+  handle('employees:list', () => backend.get('/api/admin/employees'));
+  form('employees:create', async (_e, data) => { const r = await backend.post('/api/admin/employees', data); send('admin:update'); return r; });
+  form('employees:update', async (_e, id, data) => { const r = await backend.patch(`/api/admin/employees/${enc(id)}`, data); send('admin:update'); return r; });
+  form('employees:delete', async (_e, id, name) => {
+    if (!(await confirm(`Remove ${String(name || 'this employee').slice(0, 120)}?`, 'They disappear from the employee list and from the reporting-person list. This cannot be undone.', 'Remove'))) return false;
+    await backend.delete(`/api/admin/employees/${enc(id)}`);
+    send('admin:update');
+    return true;
+  });
   handle('assets:list', () => backend.get('/api/admin/assets'));
 
   // Orbit: tasks, appreciation, team insights

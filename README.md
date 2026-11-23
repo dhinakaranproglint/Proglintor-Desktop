@@ -118,11 +118,11 @@ effort, focus streaks, or extra effort they describe) can be sent to the admin, 
 - **Hiding, and getting it back:** right-click the companion for "Hide for 1 hour" (comes back by itself) or "Hide until I turn it back on". It is
   easy to bring back from anywhere: press **Cmd+Option+Shift+A**, click the menu-bar icon, click the "Orbit is hidden. Show" button that appears in the
   dashboard sidebar, tick Customise > "Keep me on screen", or simply launch the app again (that counts as "I want to see it").
-- **Screen sharing and presenting:** the companion is kept out of shares in layers. (1) Its windows are excluded from screen capture where the
-  operating system honours it (best effort: newer macOS capture APIs, used by Zoom, Teams and Meet, may ignore it). (2) It hides itself while a call
-  or presentation app is in front, or while Zoom's share helper is running. (3) **Presenting mode** hides it completely and holds every reminder and
-  notification until you turn it off: use the orb's right-click menu, the menu-bar item, the Orbit page, or the shortcut Cmd+Option+Shift+O
-  (Ctrl+Alt+Shift+O elsewhere). It switches itself off after 3 hours so it can never stay hidden by accident. All three are optional in Customise.
+- **Screen sharing and calls:** the companion is **never hidden automatically**. It is not excluded from screen captures, it does not hide when Teams,
+  Zoom or any app is sharing or in front, and it does not look for share helpers. What is still polite: reminders wait while a call or presentation
+  app is in front (Reminders > "Stay quiet in calls and presentations"), and greetings wait while another app is full screen. **Presenting mode** is
+  the only way to hide it, and only because you switch it on yourself (the orb's right-click menu, the menu-bar item, the Orbit page, or
+  Cmd+Option+Shift+O, Ctrl+Alt+Shift+O elsewhere). It switches itself off after 3 hours so it can never stay hidden by accident.
 - **Always running, and there when you open your laptop:** the installed agent starts at login and can't be quit from its own menus
   (`npm run dist:agent:mac` builds the installer). For development on macOS, `npm run autostart:on` makes the dev agent start hidden at every login
   (`autostart:off` turns it off, `autostart:status` shows the state); after that it greets you whenever you open the laptop: the first time each

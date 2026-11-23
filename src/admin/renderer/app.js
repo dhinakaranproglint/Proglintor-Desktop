@@ -11,7 +11,7 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 document.body.classList.add(`platform-${agent.platform}`);
 $$('[data-icon]').forEach((el) => { el.outerHTML = icon(el.dataset.icon, 17); });
 
-const state = { page: 'dashboard', assetFilter: 'all', assetQuery: '', alertFilter: 'new', drawer: null, policyDraft: null };
+const state = { page: 'dashboard', empQuery: '', assetFilter: 'all', assetQuery: '', alertFilter: 'new', drawer: null, policyDraft: null };
 
 // ---- helpers ------------------------------------------------------------------------------
 
@@ -167,44 +167,144 @@ function drawAssets(assets) {
   });
 }
 
+// ---- employees (onboarding + reporting person) ---------------------------------------------------
+
+async function renderEmployees() {
+  const emps = await admin.employees();
+  if (state.page !== 'employees') return;
+  const typing = document.activeElement?.id === 'emp-q';
+  if (!typing || !$('#emp-table')) {
+    view.innerHTML = `
+      ${topbar('Employees', `${emps.length} onboarded`, `<label class="search">${icon('search', 14)}<input id="emp-q" type="search" placeholder="Search name, employee ID, email" value="${esc(state.empQuery)}"></label><button class="btn primary" id="emp-new">${icon('plus', 14)} Onboard employee</button>`)}
+      <div class="content"><div class="table" id="emp-table"></div></div>`;
+    $('#emp-q').addEventListener('input', (e) => { state.empQuery = e.target.value; drawEmployees(emps); });
+    $('#emp-new').addEventListener('click', () => openEmployeeDialog(null, emps));
+  }
+  drawEmployees(emps);
+}
+
+function drawEmployees(emps) {
+  const el = $('#emp-table');
+  if (!emps.length) {
+    el.innerHTML = `<div class="empty"><div class="ei">${icon('user', 24)}</div><b>No employees yet</b>Onboard each employee first, then assign them a laptop under Assets.<div style="margin-top:14px"><button class="btn primary" id="emp-new-empty">${icon('plus', 14)} Onboard employee</button></div></div>`;
+    $('#emp-new-empty').addEventListener('click', () => openEmployeeDialog(null, emps));
+    return;
+  }
+  const q = state.empQuery.trim().toLowerCase();
+  const rows = emps.filter((e) => !q || [e.name, e.employeeId, e.email, e.department, e.managerName].some((v) => String(v || '').toLowerCase().includes(q)));
+  el.innerHTML = `
+    <div class="emp-row head"><span>Employee ID</span><span>Name</span><span>Department</span><span>Reports to</span><span>Assets</span><span></span></div>
+    ${rows.map((e) => `
+      <div class="emp-row item" data-emp="${e.id}" tabindex="0">
+        <span><span class="idpill">${esc(e.employeeId)}</span></span>
+        <span style="display:flex;gap:10px;align-items:center;min-width:0"><span class="avatar" style="--h:${hue(e.name)}">${esc(initials(e.name))}</span><span style="min-width:0"><span class="nm">${esc(e.name)}${e.active ? '' : ' <span class="muted small">(inactive)</span>'}</span><span class="sub">${esc(e.designation ? `${e.designation} · ${e.email}` : e.email)}</span></span></span>
+        <span class="nm" style="font-weight:500">${esc(e.department || '—')}</span>
+        <span style="min-width:0">${e.managerName ? `<span class="nm" style="font-weight:500">${esc(e.managerName)}</span><span class="sub">${esc(e.managerEmployeeId)}</span>` : '<span class="muted">—</span>'}</span>
+        <span class="num">${e.assetIds.length ? esc(e.assetIds.join(', ')) : '<span class="muted">None</span>'}</span>
+        <span class="chev muted">${icon('right', 14)}</span>
+      </div>`).join('') || '<div class="empty"><b>No matching employees</b></div>'}`;
+  $$('.emp-row.item', el).forEach((r) => {
+    const open = () => openEmployeeDialog(emps.find((e) => String(e.id) === r.dataset.emp), emps);
+    r.addEventListener('click', open);
+    r.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') open(); });
+  });
+}
+
+function openEmployeeDialog(existing, emps) {
+  const e = existing || { active: true };
+  const field = (id, label, value, opts = {}) => `<label class="field ${opts.full ? 'full' : ''}"><span>${label}${opts.req ? '<em>*</em>' : ''}</span>
+    <input class="input ${opts.mono ? 'mono' : ''}" id="${id}" value="${esc(value || '')}" placeholder="${esc(opts.ph || '')}" ${opts.type ? `type="${opts.type}"` : ''}>${opts.hint ? `<small>${opts.hint}</small>` : ''}</label>`;
+  const bosses = emps.filter((x) => x.active && x.id !== e.id);
+  $('#dialog-root').innerHTML = `
+    <div class="dialog-backdrop" id="dlg-bg">
+      <div class="dialog" role="dialog" aria-modal="true">
+        <h2>${existing ? `Edit ${esc(e.name)}` : 'Onboard employee'}</h2>
+        <p class="lead">${existing ? 'Changes also update the assets assigned to this person.' : 'Add the person, then choose who they report to. You can assign them a laptop afterwards under Assets.'}</p>
+        <div class="form-grid">
+          ${field('e-id', 'Employee ID', e.employeeId, { req: true, mono: true, ph: 'PGL-0123' })}
+          ${field('e-name', 'Name', e.name, { req: true, ph: 'Priya Sharma' })}
+          ${field('e-email', 'Email address', e.email, { req: true, ph: 'priya.sharma@proglint.com', type: 'email' })}
+          ${field('e-dept', 'Department', e.department, { ph: 'Engineering' })}
+          ${field('e-desig', 'Designation', e.designation, { ph: 'Software Engineer' })}
+          <label class="field"><span>Reports to</span>
+            <select class="input" id="e-mgr"><option value="">No reporting person</option>${bosses.map((x) => `<option value="${x.id}" ${e.managerId === x.id ? 'selected' : ''}>${esc(empLabel(x))}</option>`).join('')}</select>
+            <small>Orbit messages this person if the employee says they have no task.</small></label>
+          ${existing ? `<label class="field full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="e-active" ${e.active ? 'checked' : ''}><span style="font-weight:500">Active (can be assigned an asset)</span></label>` : ''}
+        </div>
+        <div class="form-error" id="f-err" style="margin-top:12px"></div>
+        <div class="actions">${existing ? '<button class="btn ghost danger" id="e-del" style="margin-right:auto">Remove</button>' : ''}<button class="btn ghost" id="f-cancel">Cancel</button><button class="btn primary" id="e-save">${existing ? 'Save changes' : `${icon('plus', 14)} Onboard`}</button></div>
+      </div>
+    </div>`;
+  $('#dlg-bg').addEventListener('mousedown', (ev) => { if (ev.target.id === 'dlg-bg') closeDialog(); });
+  $('#f-cancel').addEventListener('click', closeDialog);
+  $('#e-id').focus();
+  $('#e-save').addEventListener('click', async () => {
+    const data = { employeeId: $('#e-id').value.trim(), name: $('#e-name').value.trim(), email: $('#e-email').value.trim(), department: $('#e-dept').value.trim(),
+      designation: $('#e-desig').value.trim(), managerId: $('#e-mgr').value };
+    if (existing) data.active = $('#e-active').checked;
+    const r = existing ? await admin.updateEmployee(existing.id, data) : await admin.createEmployee(data);
+    if (!r.ok) { $('#f-err').textContent = r.error; return; }
+    closeDialog();
+    refresh();
+  });
+  $('#e-del')?.addEventListener('click', async () => {
+    const r = await admin.deleteEmployee(existing.id, existing.name);
+    if (!r.ok) { $('#f-err').textContent = r.error; return; }
+    if (r.data) { closeDialog(); refresh(); }
+  });
+}
+
 // ---- asset dialog (create / edit) ---------------------------------------------------------------
 
 function closeDialog() { $('#dialog-root').innerHTML = ''; }
 
-function openAssetDialog(existing = null) {
+const empLabel = (e) => `${e.name} (${e.employeeId})`;
+
+async function openAssetDialog(existing = null) {
   const a = existing || { deviceType: 'Laptop' };
+  const all = await admin.employees().catch(() => []);
+  const staff = all.filter((e) => e.active || e.id === a.employeeRef);
   const field = (id, label, value, opts = {}) => `<label class="field ${opts.full ? 'full' : ''}"><span>${label}${opts.req ? '<em>*</em>' : ''}</span>
     ${opts.textarea ? `<textarea class="input" id="${id}" rows="2" placeholder="${esc(opts.ph || '')}">${esc(value || '')}</textarea>`
       : `<input class="input ${opts.mono ? 'mono' : ''}" id="${id}" value="${esc(value || '')}" placeholder="${esc(opts.ph || '')}" ${opts.disabled ? 'disabled' : ''} ${opts.type ? `type="${opts.type}"` : ''}>`}
     ${opts.hint ? `<small>${opts.hint}</small>` : ''}</label>`;
+  const legacy = existing && !existing.employeeRef;
   $('#dialog-root').innerHTML = `
     <div class="dialog-backdrop" id="dlg-bg">
       <div class="dialog" role="dialog" aria-modal="true">
         <h2>${existing ? `Edit ${esc(existing.assetId)}` : 'New asset'}</h2>
-        <p class="lead">${existing ? 'Update the employee and device details.' : 'Register a company laptop and assign it to an employee.'}</p>
+        <p class="lead">${existing ? 'Update the employee and device details.' : 'Register a company laptop and assign it to an onboarded employee.'}</p>
         <div class="form-grid">
           ${field('f-id', 'Asset ID', a.assetId, { req: true, mono: true, ph: 'PGL-LT-0042', disabled: Boolean(existing), hint: existing ? 'Asset IDs cannot be changed.' : 'The ID on the asset tag, e.g. PGL-LT-0042.' })}
           <label class="field"><span>Device type</span><select class="input" id="f-type">${['Laptop', 'Desktop', 'Workstation', 'Other'].map((t) => `<option ${a.deviceType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-          ${field('f-name', 'Employee name', a.employeeName, { req: true, ph: 'Priya Sharma' })}
-          ${field('f-email', 'Employee email address', a.employeeEmail, { req: true, ph: 'priya.sharma@proglint.com', type: 'email' })}
-          ${field('f-dept', 'Department', a.department, { ph: 'Engineering' })}
-          ${field('f-mgr', 'Reports to (name)', a.managerName, { ph: 'Raj Rao', hint: 'Orbit messages this person if the employee says they have no task.' })}
-          ${field('f-mgr-email', 'Reports to (email)', a.managerEmail, { ph: 'raj.rao@proglint.com', type: 'email' })}
-          ${field('f-loc', 'Office / address', a.location, { ph: 'Chennai office, 3rd floor' })}
+          <label class="field full"><span>Employee<em>*</em></span>
+            <select class="input" id="f-emp"><option value="">${staff.length ? 'Select an employee' : 'No employees onboarded yet'}</option>${staff.map((e) => `<option value="${e.id}" ${a.employeeRef === e.id ? 'selected' : ''}>${esc(empLabel(e))}</option>`).join('')}</select>
+            <small>${legacy ? `Currently ${esc(a.employeeName)}, entered before onboarding existed. Pick the onboarded employee to link them.` : 'Only onboarded employees appear here.'}${staff.length ? '' : ' <a href="#" data-goto="employees">Onboard an employee</a> first.'}</small></label>
+          <div class="emp-card full" id="f-emp-card" hidden></div>
+          ${field('f-loc', 'Office / address', a.location, { full: true, ph: 'Chennai office, 3rd floor' })}
           ${field('f-notes', 'Notes', a.notes, { full: true, textarea: true, ph: 'Serial number, accessories, etc.' })}
         </div>
         <div class="form-error" id="f-err" style="margin-top:12px"></div>
         <div class="actions"><button class="btn ghost" id="f-cancel">Cancel</button><button class="btn primary" id="f-save">${existing ? 'Save changes' : `${icon('plus', 14)} Create asset`}</button></div>
       </div>
     </div>`;
+  const showCard = () => {
+    const e = staff.find((x) => String(x.id) === $('#f-emp').value);
+    const card = $('#f-emp-card');
+    card.hidden = !e;
+    if (e) card.innerHTML = `<b>${esc(e.name)}</b> · ${esc(e.employeeId)}<br>${esc(e.email)}${e.department ? ` · ${esc(e.department)}` : ''}<br>Reports to: ${e.managerName ? `${esc(e.managerName)} (${esc(e.managerEmployeeId)})` : '<span class="muted">not set</span>'}`;
+  };
+  $('#f-emp').addEventListener('change', showCard);
+  showCard();
   $('#dlg-bg').addEventListener('mousedown', (e) => { if (e.target.id === 'dlg-bg') closeDialog(); });
   $('#f-cancel').addEventListener('click', closeDialog);
-  (existing ? $('#f-name') : $('#f-id')).focus();
+  (existing ? $('#f-emp') : $('#f-id')).focus();
   $('#f-save').addEventListener('click', async () => {
     const data = {
-      assetId: $('#f-id').value.trim(), deviceType: $('#f-type').value, employeeName: $('#f-name').value.trim(), employeeEmail: $('#f-email').value.trim(),
-      department: $('#f-dept').value.trim(), managerName: $('#f-mgr').value.trim(), managerEmail: $('#f-mgr-email').value.trim(), location: $('#f-loc').value.trim(), notes: $('#f-notes').value.trim(),
+      assetId: $('#f-id').value.trim(), deviceType: $('#f-type').value, employeeRef: $('#f-emp').value, location: $('#f-loc').value.trim(), notes: $('#f-notes').value.trim(),
     };
+    if (!data.employeeRef && !legacy) { $('#f-err').textContent = 'Select an employee. Onboard them first if they are not in the list.'; return; }
+    if (!data.employeeRef) delete data.employeeRef;
     const r = existing ? await admin.updateAsset(existing.assetId, data) : await admin.createAsset(data);
     if (!r.ok) { $('#f-err').textContent = r.error; return; }
     if (existing) { closeDialog(); refresh(); return; }
@@ -495,7 +595,7 @@ function offlineBanner(err) {
 
 // ---- navigation & live updates ------------------------------------------------------------------
 
-const PAGES = { dashboard: renderDashboard, assets: renderAssets, approvals: renderApprovals, software: renderSoftware, tasks: renderTasks, timesheets: renderTimesheets, awards: renderAwards, recognition: renderRecognition, team: renderTeam, alerts: renderAlerts, policies: renderPolicies, settings: renderSettings };
+const PAGES = { dashboard: renderDashboard, employees: renderEmployees, assets: renderAssets, approvals: renderApprovals, software: renderSoftware, tasks: renderTasks, timesheets: renderTimesheets, awards: renderAwards, recognition: renderRecognition, team: renderTeam, alerts: renderAlerts, policies: renderPolicies, settings: renderSettings };
 
 function go(page) {
   closeDrawer();

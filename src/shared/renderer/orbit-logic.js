@@ -39,7 +39,7 @@
     { id: 'focusEnd', label: 'Focus session over', animal: 'sloth', when: () => 'When a focus session ends' },
   ];
   const DEFAULT_BUDDIES = Object.fromEntries(EVENTS.map((e) => [e.id, e.animal]));
-  const DEFAULTS = { name: 'Orbit', avatar: 'redpanda', buddies: DEFAULT_BUDDIES, color: '#7C5CFF', style: 'aurora', sound: 'chime', volume: 0.35, speak: false, greet: true, motion: true, show: true, dock: 'bottom-right', size: 'm', x: null, y: null, welcomeBack: 20, buddy: 'animals', hideFromShare: true, hideInCalls: true };
+  const DEFAULTS = { name: 'Orbit', avatar: 'redpanda', buddies: DEFAULT_BUDDIES, color: '#7C5CFF', style: 'aurora', sound: 'chime', volume: 0.35, speak: false, greet: true, motion: true, show: true, dock: 'bottom-right', size: 'm', x: null, y: null, welcomeBack: 20, buddy: 'animals' };
 
   const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -55,7 +55,7 @@
     if (STYLES.some((s) => s.id === i.style)) p.style = i.style;
     if (SOUNDS.some((s) => s.id === i.sound)) p.sound = i.sound;
     if (typeof i.volume === 'number' && Number.isFinite(i.volume)) p.volume = Math.min(1, Math.max(0, Math.round(i.volume * 100) / 100));
-    for (const k of ['speak', 'greet', 'motion', 'show', 'hideFromShare', 'hideInCalls']) if (typeof i[k] === 'boolean') p[k] = i[k];
+    for (const k of ['speak', 'greet', 'motion', 'show']) if (typeof i[k] === 'boolean') p[k] = i[k];
     if (DOCKS.some((d) => d.id === i.dock)) { p.dock = i.dock; p.x = null; p.y = null; } // picking a corner forgets a dragged position
     if (i.dock === 'free' && Number.isFinite(i.x) && Number.isFinite(i.y)) { p.dock = 'free'; p.x = Math.round(i.x); p.y = Math.round(i.y); }
     if (SIZES.some((z) => z.id === i.size)) p.size = i.size;

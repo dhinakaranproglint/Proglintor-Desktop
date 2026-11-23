@@ -3,7 +3,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, powerMonitor, dialog, shell, na
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 
 const platform = require('./platform');
 const { UsageStore, dayKey } = require('./store');
@@ -675,9 +675,8 @@ function applyCompanion() {
     ...(IS_MAC ? { type: 'panel' } : {}),
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  companionWin.setContentProtection(persona().hideFromShare);
   companionWin.setAlwaysOnTop(true, 'floating');
-  companionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+  companionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); // stays visible over a full-screen app too, so a shared full-screen window still shows it
   companionWin.setIgnoreMouseEvents(true, { forward: true }); // clicks pass through until the pointer is over the orb or its bubble
   companionWin.loadFile(path.join(RENDERER, 'orbit-companion.html'));
   companionWin.once('ready-to-show', () => companionWin.showInactive());
@@ -783,21 +782,16 @@ function maybeGreet() {
 const fullscreenApp = makeFullscreenProbe(() => screen.getPrimaryDisplay().bounds);
 
 // ---- keeping the companion out of screen shares ----------------------------------------------------------
-// Layers: (1) the windows are excluded from screen capture where the OS honours it (best effort; newer macOS capture APIs ignore it),
-// (2) the companion hides itself while a call or presentation app is in front, or while Zoom's share helper is running,
-// (3) Presenting mode hides it completely on demand (menu, tray, or the keyboard shortcut) and holds every reminder until it is switched off.
+// The companion is never hidden automatically: not during screen shares, recordings or calls. The only way to hide it is Presenting mode,
+// which the person switches on themselves (menu, tray, or the keyboard shortcut); it holds every reminder until it is switched off.
 let presenting = false;
 let presentingTimer = null;
-let zoomSharing = false;
 
-const frontApp = () => { const st = tracker?.status() || {}; return `${st.current?.id || ''} ${st.current?.name || ''}`; };
-const mustHideCompanion = () => CareLogic.shouldHideCompanion({
-  presenting, sharing: zoomSharing, hideInCalls: persona().hideInCalls, pauseInMeetings: settings.care.pauseInMeetings, current: frontApp(), quietApps: settings.care.quietApps,
-});
+const mustHideCompanion = () => CareLogic.shouldHideCompanion({ presenting });
 
 let orbitLog = null;
 let lastHideReason = '';
-const hideReason = () => (presenting ? 'presenting mode' : zoomSharing ? 'zoom is sharing' : mustHideCompanion() ? `call or presentation app in front (${frontApp().trim()})` : '');
+const hideReason = () => (presenting ? 'presenting mode' : '');
 
 function refreshPrivacy() {
   if (settings.orbitHiddenUntil && Date.now() >= settings.orbitHiddenUntil) showCompanionAgain(); // the timed hide is over
@@ -806,7 +800,6 @@ function refreshPrivacy() {
   if (reason !== lastHideReason) { orbitLog?.(hide ? 'companion.hidden' : 'companion.shown', { reason }); lastHideReason = reason; }
   for (const w of [companionWin, greetWin]) {
     if (!w || w.isDestroyed()) continue;
-    w.setContentProtection(persona().hideFromShare);
     if (hide && w.isVisible()) w.hide();
     else if (!hide && w === companionWin && !w.isVisible() && persona().show) w.showInactive();
   }
@@ -828,8 +821,6 @@ function startPrivacyWatch() {
   orbitLog = makeLog(app.getPath('userData'), 'orbit.log');
   orbitLog('agent.start', { args: process.argv.slice(2).join(' '), show: persona().show });
   setInterval(refreshPrivacy, 2000);
-  // Zoom starts a helper called CptHost for as long as someone is sharing their screen: a real "sharing now" signal.
-  if (process.platform === 'darwin') setInterval(() => execFile('pgrep', ['-x', 'CptHost'], (err) => { zoomSharing = !err; }), 5000);
   try { globalShortcut.register(OrbitLogic.PRESENTING_SHORTCUT, () => setPresenting(!presenting)); } catch { /* another app owns the shortcut: the menu still works */ }
   try { globalShortcut.register(OrbitLogic.COMPANION_SHORTCUT, toggleCompanion); } catch { /* the other ways back still work */ }
   app.on('will-quit', () => globalShortcut.unregisterAll());
@@ -903,7 +894,6 @@ function showGreeting() {
     ...(IS_MAC ? { type: 'panel' } : {}), // same reason as the companion: it must appear while another app is in front
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  greetWin.setContentProtection(persona().hideFromShare);
   greetWin.setAlwaysOnTop(true, 'floating');
   greetWin.loadFile(path.join(RENDERER, 'orbit-greet.html'));
   greetWin.once('ready-to-show', () => greetWin.showInactive());

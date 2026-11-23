@@ -27,6 +27,12 @@
     .right { text-align: right; }
     .assets-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(200px, 1.4fr) minmax(120px, 1fr) minmax(200px, 1.5fr) 80px 110px 18px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
     .assets-row.head { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; background: var(--surface-2); padding: 9px 18px; }
+    .emp-row { display: grid; grid-template-columns: minmax(90px, .7fr) minmax(180px, 1.4fr) minmax(110px, 1fr) minmax(150px, 1.1fr) minmax(90px, .7fr) 18px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
+    .emp-row.head { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; background: var(--surface-2); padding: 9px 18px; }
+    .emp-row.item { cursor: pointer; }
+    .emp-row.item:hover { background: var(--surface-2); }
+    .emp-row:last-child { border-bottom: none; }
+    .emp-card { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; color: var(--text-2); }
     .assets-row.item:hover { background: var(--surface-2); }
     .assets-row:last-child { border-bottom: none; }
     .alert-card { display: grid; grid-template-columns: 40px 1fr auto; gap: 14px; align-items: start; }
@@ -214,6 +220,7 @@
         <button data-page="alerts"><span data-icon="bell"></span>Weekend alerts<span class="badge" id="alert-badge" hidden></span></button>
         <button data-page="tasks"><span data-icon="clipboard"></span>Tasks</button>
         <div class="nav-label nav-group">People</div>
+        <button data-page="employees"><span data-icon="user"></span>Employees</button>
         <button data-page="timesheets"><span data-icon="calendar"></span>Timesheets</button>
         <button data-page="recognition"><span data-icon="bell"></span>Recognition<span class="badge" id="rec-badge" hidden></span></button>
         <button data-page="awards"><span data-icon="award"></span>Employee of the Month</button>

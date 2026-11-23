@@ -78,17 +78,12 @@ test('it stays quiet in the apps the person lists, and can be told to ignore ful
   assert.equal(C.sanitizeCare({}).respectFullscreen, true, 'on by default');
 });
 
-test('the companion hides itself for presenting mode, a detected share, or a call app in front, and the person can opt out', () => {
-  const base = { hideInCalls: true, pauseInMeetings: true, quietApps: ['zoom', 'keynote'], current: 'com.microsoft.VSCode Visual Studio Code' };
-  assert.equal(C.shouldHideCompanion(base), false, 'normal work: visible');
-  assert.equal(C.shouldHideCompanion({ ...base, presenting: true }), true, 'presenting mode always hides');
-  assert.equal(C.shouldHideCompanion({ ...base, sharing: true }), true, 'a detected share always hides');
-  assert.equal(C.shouldHideCompanion({ ...base, current: 'us.zoom.xos zoom.us' }), true);
-  assert.equal(C.shouldHideCompanion({ ...base, current: 'com.apple.iWork.Keynote Keynote' }), true);
-  assert.equal(C.shouldHideCompanion({ ...base, current: 'com.microsoft.teams2 Microsoft Teams' }), true, 'the built-in call-app list applies too');
-  assert.equal(C.shouldHideCompanion({ ...base, current: 'us.zoom.xos zoom.us', hideInCalls: false }), false, 'opted out of auto-hide');
-  assert.equal(C.shouldHideCompanion({ ...base, current: 'us.zoom.xos zoom.us', pauseInMeetings: false }), false);
-  assert.equal(C.shouldHideCompanion({ ...base, current: 'us.zoom.xos zoom.us', hideInCalls: false, presenting: true }), true, 'presenting mode overrides opting out');
+test('the companion is hidden only by Presenting mode, never automatically for screen shares or call apps', () => {
+  assert.equal(C.shouldHideCompanion({ presenting: true }), true, 'presenting mode (switched on by the person) hides it');
+  // never automatic: a detected share, a call app or a presentation app in front must not hide it
+  assert.equal(C.shouldHideCompanion({ sharing: true }), false, 'a screen share does not hide it');
+  assert.equal(C.shouldHideCompanion({ current: 'com.microsoft.teams2 Microsoft Teams', quietApps: ['zoom', 'keynote'] }), false, 'Teams in front does not hide it');
+  assert.equal(C.shouldHideCompanion({ current: 'us.zoom.xos zoom.us', hideInCalls: true, pauseInMeetings: true }), false, 'Zoom in front does not hide it');
   assert.equal(C.shouldHideCompanion(), false);
 });
 
@@ -104,10 +99,9 @@ test('presenting mode holds reminders (nothing is lost) and releases them when s
   assert.equal(shown.length, 1, 'the water reminder arrives as soon as presenting ends');
 });
 
-test('privacy settings default to on and are validated', () => {
+test('there are no automatic-hide settings, and the presenting shortcut is defined', () => {
   const L = require('../src/shared/renderer/orbit-logic');
-  assert.deepEqual([L.DEFAULTS.hideFromShare, L.DEFAULTS.hideInCalls], [true, true]);
-  assert.equal(L.sanitizePersona({ hideFromShare: false }).hideFromShare, false);
-  assert.equal(L.sanitizePersona({ hideInCalls: 'no' }).hideInCalls, true, 'only real booleans are accepted');
+  assert.equal('hideFromShare' in L.DEFAULTS || 'hideInCalls' in L.DEFAULTS, false, 'there is no automatic hiding to configure');
+  assert.equal('hideFromShare' in L.sanitizePersona({ hideFromShare: true }), false);
   assert.match(L.PRESENTING_SHORTCUT, /^CommandOrControl\+Alt\+Shift\+O$/);
 });

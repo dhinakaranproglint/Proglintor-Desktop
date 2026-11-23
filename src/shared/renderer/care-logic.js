@@ -33,13 +33,11 @@
   const SNOOZE_MS = 10 * MIN;
   const MEETING_RE = /teams|zoom|webex|gotomeeting|bluejeans|meet\.google|slack huddle/i;
   /**
-   * Should the companion be completely out of sight right now (so it can't show up in a screen share or recording)?
-   * Presenting mode and a detected share always hide it; a call or presentation app in front hides it if the person allows that.
+   * Should the companion be out of sight right now? Only when the person switched Presenting mode on themselves.
+   * It is never hidden automatically (not for screen shares, recordings, or call apps), so it stays visible in demos and calls.
    */
-  function shouldHideCompanion({ presenting = false, sharing = false, hideInCalls = true, pauseInMeetings = true, current = '', quietApps = [] } = {}) {
-    if (presenting || sharing) return true;
-    if (!hideInCalls || !pauseInMeetings) return false;
-    return inQuietApp(current, quietApps) || MEETING_RE.test(String(current || ''));
+  function shouldHideCompanion({ presenting = false } = {}) {
+    return presenting === true;
   }
 
   /** Is the app in front one the person asked us to stay quiet in? (a plain, case-insensitive "contains" match: no patterns) */

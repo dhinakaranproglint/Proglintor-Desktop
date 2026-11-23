@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('admin', {
   logout: call('auth:logout'),
   // Data
   dashboard: call('dash:get'),
+  employees: call('employees:list'),
+  createEmployee: (data) => ipcRenderer.invoke('employees:create', data),
+  updateEmployee: (id, data) => ipcRenderer.invoke('employees:update', id, data),
+  deleteEmployee: (id, name) => ipcRenderer.invoke('employees:delete', id, name),
   assets: call('assets:list'),
   assetDetail: call('assets:detail'),
   createAsset: (data) => ipcRenderer.invoke('assets:create', data),
